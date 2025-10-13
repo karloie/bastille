@@ -1,0 +1,6 @@
+test/clientkeys
+test/hostkeys
+test/smtp_pass
+test/target1/.ssh
+test/target2/.ssh
+test/home

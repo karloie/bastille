@@ -1,0 +1,58 @@
+---
+networks:
+  testing:
+    driver: bridge
+    ipam:
+      config:
+        - gateway: 172.16.4.1
+          subnet: 172.16.4.0/24
+
+services:
+
+  bastille:
+    build: ../
+#    command: debug
+    environment:
+      CIPHERS: | # remove sus ciphers
+        -chacha20-poly1305@openssh.com
+      HOSTKEYALGORITHMS: | # remove sus host key algorithm
+        -rsa-sha2-256
+      KEXALGORITHMS: | # remove sus kex algorithm
+        -diffie-hellman-group16-sha512
+        diffie-hellman-group14-sha256
+      LOGLEVEL: VERBOSE
+      MACS: | # remove sus mac algorithm
+        -hmac-sha2-256-etm@openssh.com
+      SMTP_HOST: smtp.gmail.com
+      SMTP_USER: karloie@gmail.com
+      TESTING: 'yes'
+    hostname: bastille
+    networks:
+      testing:
+        ipv4_address: 172.16.4.10
+    ports:
+      - 22222:22222/tcp
+    read_only: true
+    tmpfs:
+      - /run
+      - /tmp
+    volumes:
+      - ./home:/home:ro
+      - ./hostkeys:/hostkeys:rw
+      - ./smtp_pass:/run/secrets/smtp_pass:ro
+
+  target1:
+    build: target1
+    depends_on:
+      - bastille
+    networks:
+      testing:
+        ipv4_address: 172.16.4.12
+
+  target2:
+    build: target2
+    depends_on:
+      - target1
+    networks:
+      testing:
+        ipv4_address: 172.16.4.13
