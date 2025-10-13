@@ -1,0 +1,34 @@
+# Version control
+.git
+.github
+.gitignore
+
+# Documentation
+*.md
+doc/
+
+# Build artifacts
+bastille
+.cache
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Test files and scripts
+test/
+pkg/testharness/
+*.sh
+
+# CI/CD
+Makefile
+
+# Test artifacts
+test/ca/
+test/clientkeys/
+test/hostkeys/
+test/home/
+test/target1/
+test/target2/
+test/artifacts/
+test/smtp_pass

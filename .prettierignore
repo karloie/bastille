@@ -1,0 +1,20 @@
+# Prevent Prettier from touching Go sources and build files
+
+# All Go source and test files
+**/*.go
+
+# Go module manifests
+go.mod
+go.sum
+
+# Build/CI artifacts and scripts
+Makefile
+Dockerfile
+
+# Common Go test artifacts
+coverage.out
+coverage.html
+
+# Binaries and test executables
+bastille
+*.test
