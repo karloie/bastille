@@ -13,6 +13,7 @@ services:
     build: ../
 #    command: debug
     environment:
+#      LOGLEVEL: VERBOSE
       CIPHERS: | # remove sus ciphers
         -chacha20-poly1305@openssh.com
       HOSTKEYALGORITHMS: | # remove sus host key algorithm
@@ -20,12 +21,13 @@ services:
       KEXALGORITHMS: | # remove sus kex algorithm
         -diffie-hellman-group16-sha512
         diffie-hellman-group14-sha256
-      LOGLEVEL: VERBOSE
       MACS: | # remove sus mac algorithm
         -hmac-sha2-256-etm@openssh.com
       SMTP_HOST: smtp.gmail.com
       SMTP_USER: karloie@gmail.com
-      TESTING: 'yes'
+      TESTING: yes
+      STRICTMODES: yes
+      MODULI_MIN: "4096"
     hostname: bastille
     networks:
       testing:
@@ -37,7 +39,7 @@ services:
       - /run
       - /tmp
     volumes:
-      - ./home:/home:ro
+      - ./home:/home:rw
       - ./hostkeys:/hostkeys:rw
       - ./smtp_pass:/run/secrets/smtp_pass:ro
 
