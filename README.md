@@ -84,7 +84,7 @@ ssh root@172.16.4.13 -J stitch@127.0.0.1:22222
 
 ### Email notification
 
-Configure the SMTP parameters if you want en email sent for each successful SSH jump. The SMTP parameters are regular environment variables except for SMTP_PASS_FILE which should be the path to a file with the SMTP password, not the password it self.
+Configure the SMTP parameters if you want an email sent for each successful SSH jump. The SMTP parameters are regular environment variables except for SMTP_PASS_FILE which should be the path to a file with the SMTP password, not the password it self.
 
 The default is `/run/secrets/smtp_pass` and should be mounted onto the container. Look at the `test/docker-compose.yml` file as an example.
 
@@ -97,12 +97,14 @@ The jump server can be configured further with these environment variables.
 | -------------------| :-----: | ------------------------|
 | LISTEN_PORT        | 22222    | Listening port          |
 | LOGLEVEL           | INFO    | Loging level         (INFO\|VERBOSE\|DEBUG)   |
-| TESTING | no     | Testing (yes\|no)   |
+| TESTING            | no     | Testing (yes\|no)   |
+| STRICTMODES        | no     | If set to yes, the UID of /home entries are strictly enforced |
+| MODULI_MIN         |        | If set to a number like 2048, smaller sized moduli are filtered out |
 
 #### SSHD [sshd_config](https://www.ssh.com/academy/ssh/sshd_config) parameters.
 | Name              | Default | Description                  |
 | ----------------- | :-----: | -----------------------------|
-| AGENT_FORWARDING  | yes     | Permit agent forwarding      |
+| AGENT_FORWARDING  | no      | Permit agent forwarding      |
 | GATEWAY_PORTS     | no      | Permit gateway ports         |
 | PERMIT_TUNNEL     | no      | Permit tunnelling            |
 | TCP_FORWARDING    | yes     | Permit TCP forwarding        |
@@ -113,7 +115,6 @@ The jump server can be configured further with these environment variables.
 | --------------------------- | :-----: |
 | CASIGNATUREALGORITHMS       |    ..   |
 | CIPHERS                     |    ..   |
-| GSSAPIKEXALGORITHMS         |    ..   |
 | HOSTBASEDACCEPTEDALGORITHMS |    ..   |
 | HOSTKEYALGORITHMS           |    ..   |
 | KEXALGORITHMS               |    ..   |

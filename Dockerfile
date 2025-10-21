@@ -2,35 +2,24 @@ FROM alpine:3.22.2
 
 LABEL maintainer="Karl-Bjørnar Øie <karloie@gmail.com>"
 
-WORKDIR /root
+RUN set -eux && \
+    apk upgrade --no-cache && \
+    apk add --no-cache \
+        openssh-server-pam \
+        openssh-client-common \
+        msmtp
 
-RUN set -x && \
-    apk add --no-cache openssh-server-pam msmtp
-
-RUN find /etc -depth -type d -empty -delete && \
-    find /lib -depth -type d -empty -delete && \
-    find /var -not -path "*/empty*" -depth -type d -empty -delete && \
-    find / -maxdepth 1 -depth -type d -empty -delete
-
+WORKDIR /usr/sbin/
 COPY src/* .
-RUN chmod -R 0500 * && \
-    rm -Rf /etc/pam.d/* /etc/ssh /media /etc/fstab && \
-    ln -svf /run/msmtprc /etc/msmtprc && \
-    ln -svf /run/sshd.pam /etc/pam.d/sshd && \
-    ln -svfb /run/group /etc/group && \
-    ln -svfb /run/passwd /etc/passwd && \
-    ln -svfb /run/shadow /etc/shadow && \
-    ln -svf /usr/bin/msmtp /usr/bin/sendmail && \
-    ln -svf /usr/bin/msmtp /usr/sbin/sendmail && \
-    ln -svf /usr/sbin/sshd.pam /usr/sbin/sshd && \
-    pwd
+RUN chmod -R 0500 *.sh && init.sh && rm init*.sh
 
 ENV LISTEN_PORT="22222"
 ENV LOGLEVEL="INFO"
 ENV TESTING="no"
+ENV STRICTMODES="no"
 
 # https://linux.die.net/man/5/sshd_config
-ENV AGENT_FORWARDING="yes"
+ENV AGENT_FORWARDING="no"
 ENV GATEWAY_PORTS="no"
 ENV PERMIT_TUNNEL="no"
 ENV TCP_FORWARDING="yes"
@@ -52,9 +41,12 @@ ENV SMTP_PORT="587"
 ENV SMTP_USER=""
 ENV SMTP_PASS_FILE="/run/secrets/smtp_pass"
 
+ENV MODULI_MIN=""
+
 EXPOSE 22222/tcp
 
-ENTRYPOINT ["./entrypoint.sh"]
+WORKDIR /tmp
+ENTRYPOINT ["sshd.sh"]
 
 ARG GIT_COMMIT=unspecified
 ENV GIT_COMMIT=$GIT_COMMIT

@@ -31,4 +31,9 @@ yml2opt KexAlgorithms "${KEXALGORITHMS}"
 yml2opt MACs "${MACS}"
 yml2opt PubkeyAcceptedAlgorithms "${PUBKEYACCEPTEDALGORITHMS}"
 yml2opt RequiredRSASize "${REQUIREDRSASIZE}"
+# filter moduli file by $MODULI_MIN if requested
+if [ -f /etc/ssh/moduli ] && [ -n "$MODULI_MIN" ]; then
+    awk '$5 >= '$MODULI_MIN /etc/ssh/moduli > /run/moduli
+    echo "ModuliFile = /run/moduli # unset MODULI_MIN=$MODULI_MIN to disable override" >> ${cfg}
+fi
 echo >> ${cfg}
