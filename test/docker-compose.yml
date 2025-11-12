@@ -7,11 +7,16 @@ networks:
         - gateway: 172.16.4.1
           subnet: 172.16.4.0/24
 
+volumes:
+  go-build:
+
 services:
 
   bastille:
-    build: ../
-#    command: debug
+    build:
+      context: ../
+      dockerfile: Dockerfile.dev
+    command: bash -c 'set -x && gow run main.go config.go'
     environment:
 #      LOGLEVEL: VERBOSE
       CIPHERS: | # remove sus ciphers
@@ -34,17 +39,16 @@ services:
         ipv4_address: 172.16.4.10
     ports:
       - 22222:22222/tcp
-    read_only: true
-    tmpfs:
-      - /run
-      - /tmp
     volumes:
+      - ../:/app:rw
+      - go-build:/root/.cache/go-build:rw
       - ./home:/home:rw
       - ./hostkeys:/hostkeys:rw
       - ./smtp_pass:/run/secrets/smtp_pass:ro
 
   target1:
     build: target1
+    attach: false
     depends_on:
       - bastille
     networks:
@@ -53,6 +57,7 @@ services:
 
   target2:
     build: target2
+    attach: false
     depends_on:
       - target1
     networks:

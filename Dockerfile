@@ -1,17 +1,28 @@
-FROM alpine:3.22.2
+ARG GIT_COMMIT
+ARG VERSION
+ARG BUILD_TIME
+
+# ---- Stage 1: Build ----
+FROM golang:1.25 AS builder
+
+WORKDIR /app
+
+COPY go.* .
+RUN go mod download
+
+COPY *.go .
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+    go build -trimpath -ldflags "-s -w \
+    -X main.Version=${VERSION} \
+    -X main.GitCommit=${GIT_COMMIT} \
+    -X main.BuildTime=${BUILD_TIME}" \
+    -o bastille *.go
+
+# ---- Stage 2: Run ----
+#FROM gcr.io/distroless/static-debian12:nonroot
+FROM debian:trixie-slim
 
 LABEL maintainer="Karl-Bjørnar Øie <karloie@gmail.com>"
-
-RUN set -eux && \
-    apk upgrade --no-cache && \
-    apk add --no-cache \
-        openssh-server-pam \
-        openssh-client-common \
-        msmtp
-
-WORKDIR /usr/sbin/
-COPY src/* .
-RUN chmod -R 0500 *.sh && init.sh && rm init*.sh
 
 ENV LISTEN_PORT="22222"
 ENV LOGLEVEL="INFO"
@@ -43,10 +54,17 @@ ENV SMTP_PASS_FILE="/run/secrets/smtp_pass"
 
 ENV MODULI_MIN=""
 
+ENV AUTHBASE="/home"
+ENV AUTHKEYS="{user},{user}/.ssh/authorized_keys"
+ENV CERTBASE="/ca"
+ENV CERTKEYS="ca1.pub,ca2.pub"
+ENV HOSTBASE="/hostkeys"
+ENV HOSTKEYS="ssh_host_ed25519_key,ssh_host_rsa_key"
+ENV DEBUG="false"
+
+WORKDIR /app
+COPY --from=builder /app/bastille /usr/sbin/
+
+ENTRYPOINT ["bastille"]
+
 EXPOSE 22222/tcp
-
-WORKDIR /tmp
-ENTRYPOINT ["sshd.sh"]
-
-ARG GIT_COMMIT=unspecified
-ENV GIT_COMMIT=$GIT_COMMIT

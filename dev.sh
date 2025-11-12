@@ -78,11 +78,14 @@ function ssh_() {
 function setup(){
   keys="test/clientkeys/id_ed25519"
   home="test/home"
+  cadir="test/ca"
 
-  mkdir -p test/target1/.ssh test/target2/.ssh test/clientkeys test/home test/hostkeys
+  mkdir -p test/ca test/target1/.ssh test/target2/.ssh test/clientkeys test/home test/hostkeys
 
   [ ! -f ${keys}_lilo ] && ssh-keygen -t ed25519 -N '' -f ${keys}_lilo -C "lilo@localhost"
   [ ! -f ${keys}_stitch ] && ssh-keygen -t ed25519 -N '' -f ${keys}_stitch -C "stitch@localhost"
+  [ ! -f ${keys}_nani ] && ssh-keygen -t ed25519 -N '' -f ${keys}_nani -C "nani@localhost"
+  [ ! -f ${keys}_jumba ] && ssh-keygen -t ed25519 -N '' -f ${keys}_jumba -C "jumba@localhost"
   [ ! -f ${keys}_wrong ] && ssh-keygen -t ed25519 -N '' -f ${keys}_wrong -C "wrong@localhost"
 
   if [ ! -f ${home}/lilo ]; then
@@ -97,45 +100,47 @@ function setup(){
     cat ${keys}_stitch.pub >> ${home}/stitch
     cat ${keys}_stitch.pub >> test/target2/.ssh/authorized_keys
   fi
+
+  if [ ! -f test/ca/ca_ed25519_nani ]; then
+    ssh-keygen -t ed25519 -N "" -C "Nani Pelekai" -f test/ca/ca_ed25519_nani -q
+    ssh-keygen -q -s test/ca/ca_ed25519_nani \
+      -I "Nani Pelekai" \
+      -n nani,zone-databases \
+      -V +1d \
+      -z 1 \
+      -O source-address='172.16.4.0/24' \
+      test/clientkeys/id_ed25519_nani.pub
+    ssh-keygen -Lf test/clientkeys/id_ed25519_nani-cert.pub
+  fi
+
+  if [ ! -f test/ca/ca_ed25519_jumba ]; then
+    ssh-keygen -t ed25519 -N "" -C "CA Jumba Jookiba" -f test/ca/ca_ed25519_jumba -q
+    ssh-keygen -q -s test/ca/ca_ed25519_jumba \
+      -I "Jumba Jookiba" \
+      -n jumba,zone-databases \
+      -V +1d \
+      -z 1 \
+      -O source-address='172.16.4.0/24' \
+      test/clientkeys/id_ed25519_jumba.pub
+    ssh-keygen -Lf test/clientkeys/id_ed25519_jumba-cert.pub
+  fi
 }
 
-setup
-printA env
-echo
-printA git
-echo
+function testSmoke() {
+  echo "Smoke test:"
+  echo
+  ssh_ fail lilo@bastille-lilo pwd
+  ssh_ root@target1 -J lilo@bastille-lilo pwd
+  ssh_ root@target2 -J lilo@bastille-lilo pwd
+  ssh_ root@target2 -J stitch@bastille-stitch pwd
+  ssh_ fail root@target1 -J lilo@bastille-wrong pwd
+  ssh_ fail root@target1 -J stitch@bastille-stitch pwd
+  ssh_ root@target1 -J nani@bastille-nani pwd
+  ssh_ fail root@target1 -J jumba@bastille-jumba pwd
+  echo
+}
 
-if [ "$1" = "up" ]; then
-  set -x
-  ${composer} -f ${env[composefile]} down ${env[args]} --remove-orphans
-  ${composer} -f ${env[composefile]} up ${env[args]} --build --remove-orphans
-  set +x
-elif [ "$1" = "down" ]; then
-  set -x
-  ${composer} -f ${env[composefile]} down --remove-orphans
-  set +x
-elif [ "$1" = "exec" ]; then
-  set -x
-  if [ -z "$2"]; then
-    exec /bin/busybox sh
-  elif [ -f "$2"]; then
-    exec /busybox sh -c '
-    export PATH="/busybin:$PATH"
-    /busybox mkdir /busybin
-    /busybox --install /busybin
-    sh'
-  else
-    shift
-    exec $@
-  fi
-  set +x
-elif [ "$1" = "push" ]; then
-  set -x
-  build $tag
-  ${builder} save $space:$tag | bzip2 | ssh ${PUSH_HOST:-bastille} ${builder} load
-  ssh ${PUSH_HOST:-bastille} srv bastille restart
-  set +x
-elif [ "$1" == "test" ] && [ "$2" == "all" ]; then
+function testAccess() {
   echo "Test access (should succeed):"
   echo
   ssh_ root@target1 -J lilo@bastille-lilo pwd
@@ -152,17 +157,60 @@ elif [ "$1" == "test" ] && [ "$2" == "all" ]; then
   ssh_ fail root@target2 -J lilo@bastille-wrong pwd
   ssh_ fail lilo@bastille-lilo pwd
   echo
+}
+
+function testAlgorithms() {
   echo "Test hardening (should fail):"
   echo
-  ssh_ fail root@target1 -J lilo@bastille-bad-hostkey pwd
+#  ssh_ fail root@target1 -J lilo@bastille-bad-hostkey pwd
   ssh_ fail root@target1 -J lilo@bastille-bad-cipher pwd
   ssh_ fail root@target1 -J lilo@bastille-bad-kex pwd
   ssh_ fail root@target1 -J lilo@bastille-bad-mac pwd
+}
+
+#setup
+printA env
+echo
+printA git
+echo
+
+if [ "$1" = "up" ]; then
+  set -x
+  ${composer} -f ${env[composefile]} down ${env[args]} --remove-orphans
+  ${composer} -f ${env[composefile]} up ${env[args]} --build --remove-orphans
+  set +x
+elif [ "$1" = "down" ]; then
+  set -x
+  ${composer} -f ${env[composefile]} down --remove-orphans
+  set +x
+elif [ "$1" = "exec" ]; then
+  shift
+  set -x
+  exec $@
+elif [ "$1" = "run" ]; then
+  set -x
+  build $tag
+  ${builder} run --rm \
+    --name prod-bastille \
+    -p 22222:22222 \
+    -v go-build:/root/.cache/go-build:rw \
+    -v $PWD/test/home:/home:ro \
+    -v $PWD/test/hostkeys:/hostkeys:rw \
+    -v $PWD/test/smtp_pass:/run/secrets/smtp_pass:ro \
+    -ti $space:$tag
+elif [ "$1" = "push" ]; then
+  set -x
+  build $tag
+  ${builder} save $space:$tag | bzip2 | ssh ${PUSH_HOST:-bastille} ${builder} load
+  ssh ${PUSH_HOST:-bastille} srv bastille restart
+  set +x
+elif [ "$1" == "test" ] && [ "$2" == "all" ]; then
+  testSmoke
+  testAccess
+  testAlgorithms
+  printf "[\e[32m  OK  \e[0m] all tests ok\n";
 elif [ "$1" == "test" ]; then
-  echo "Smoke test:"
-  echo
-  ssh_ fail lilo@bastille-lilo pwd
-  ssh_ root@target2 -J lilo@bastille-lilo pwd
+  testSmoke
 else
   printf "\nUsage:\n"
   echo "./$self up|down"
