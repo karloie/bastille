@@ -21,12 +21,15 @@ var (
 	setupOK      bool
 	totalTests   int
 	failedTests  int
+	isCI         bool
 )
 
 // ────────────────────────────────
 // Test lifecycle: modes
 // ────────────────────────────────
 func TestMain(m *testing.M) {
+	isCI = os.Getenv("GITHUB_ACTIONS") == "true"
+
 	testMode = os.Getenv("TEST_MODE")
 	if testMode == "" {
 		if dockerIsRunning() {
@@ -446,4 +449,14 @@ func printSummary(code int) {
 	fmt.Printf("SSH Setup: %v\n", map[bool]string{true: "OK", false: "Skipped"}[setupOK])
 	fmt.Printf("Tests Passed: %d / %d\n", totalTests-failedTests, totalTests)
 	fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+
+	if isCI {
+		if failedTests > 0 {
+			fmt.Printf("::error title=Test Summary::❌ %d/%d tests failed in %s mode (Docker: %s)\n",
+				failedTests, totalTests, strings.ToUpper(testMode), dockerAction)
+		} else {
+			fmt.Printf("::notice title=Test Summary::✅ All %d tests passed in %s mode (Docker: %s)\n",
+				totalTests, strings.ToUpper(testMode), dockerAction)
+		}
+	}
 }
