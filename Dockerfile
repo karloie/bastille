@@ -46,11 +46,11 @@ ENV MACS="hmac-sha2-512-etm@openssh.com,hmac-sha2-256-etm@openssh.com,umac-128-e
 ENV PUBKEYACCEPTEDALGORITHMS="sk-ssh-ed25519-cert-v01@openssh.com,ssh-ed25519-cert-v01@openssh.com,rsa-sha2-512-cert-v01@openssh.com,rsa-sha2-256-cert-v01@openssh.com,sk-ssh-ed25519@openssh.com,ssh-ed25519,rsa-sha2-512,rsa-sha2-256"
 ENV REQUIREDRSASIZE="3072"
 
-ENV SMTP_HOST=""
+ENV SMTP_HOST="smtp.gmail.com"
 ENV SMTP_MAIL=""
+ENV SMTP_PASS_FILE="/run/secrets/smtp_pass"
 ENV SMTP_PORT="587"
 ENV SMTP_USER=""
-ENV SMTP_PASS_FILE="/run/secrets/smtp_pass"
 
 ENV MODULI_MIN=""
 
