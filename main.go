@@ -1,4 +1,3 @@
-// Bastille — A simple SSH jump server
 package main
 
 import (
@@ -9,7 +8,6 @@ import (
 	"crypto/subtle"
 	"encoding/base64"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -31,12 +29,13 @@ import (
 // ---------------- main ----------------
 
 var (
-	cfg      = Config{}
-	tunnels  sync.Map
-	rateMu   sync.Mutex
-	rateCnt  = map[string]int{}
-	rateNext = time.Now().Add(time.Minute)
-	rxPermit = regexp.MustCompile(`permitopen="?([^"]+)"?`)
+	cfg       = Config{}
+	rateMu    sync.Mutex
+	rateCnt   = map[string]int{}
+	rateNext  = time.Now().Add(time.Minute)
+	rxPermit  = regexp.MustCompile(`permitopen="?([^"]+)"?`)
+	tunnelsMu sync.Mutex
+	tunnels   = map[string]int{}
 )
 
 func main() {
@@ -77,7 +76,7 @@ func main() {
 	if err != nil {
 		log.Fatal().Err(err).Msg("listen failed")
 	}
-	log.Info().Msgf("Bastille listening: %s", pretty(cfg))
+	log.Info().Msgf("Bastille listening: %s", cfg.String())
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -87,67 +86,26 @@ func main() {
 // ---------------- serve ----------------
 
 func serve(ctx context.Context, srv *ssh.ServerConfig, ln net.Listener) {
-	conns := make(chan net.Conn, 16)
-	tick := time.NewTicker(10 * time.Minute)
-	defer tick.Stop()
 	var wg sync.WaitGroup
-	var cancels sync.Map
 	go func() {
-		for {
-			c, err := ln.Accept()
-			if err != nil {
-				if ctx.Err() != nil {
-					close(conns)
-					return
-				}
-				continue
-			}
-			conns <- c
-		}
+		<-ctx.Done()
+		_ = ln.Close() // unblock Accept on shutdown
 	}()
 	for {
-		select {
-		case <-ctx.Done():
-			log.Info().Msg("shutting down, waiting for active tunnels")
-			done := make(chan struct{})
-			go func() { wg.Wait(); close(done) }()
-			select {
-			case <-done:
-				log.Info().Msg("all tunnels closed gracefully")
-			case <-time.After(10 * time.Second):
-				log.Warn().Msg("force shutdown: canceling active tunnels")
-				cancels.Range(func(k, v any) bool {
-					addr := k.(string)
-					cancel := v.(context.CancelFunc)
-					log.Warn().Str("conn", addr).Msg("force-closing connection")
-					cancel()
-					return true
-				})
-				<-done
+		c, err := ln.Accept()
+		if err != nil {
+			if ctx.Err() != nil {
+				break
 			}
-			return
-		case <-tick.C:
-			tunnels.Range(func(k, v any) bool {
-				if v.(*struct{ c int }).c <= 0 {
-					tunnels.Delete(k)
-					logEvent("debug", "", nil, "", "tunnel cleaned", k, nil)
-				}
-				return true
-			})
-		case c, ok := <-conns:
-			if !ok {
-				return
-			}
-			wg.Add(1)
-			go func(c net.Conn) {
-				defer wg.Done()
-				connCtx, cancel := context.WithCancel(ctx)
-				cancels.Store(c.RemoteAddr().String(), cancel)
-				handleConn(connCtx, c, srv)
-				cancels.Delete(c.RemoteAddr().String())
-			}(c)
+			continue
 		}
+		wg.Add(1)
+		go func(c net.Conn) {
+			defer wg.Done()
+			handleConn(ctx, c, srv)
+		}(c)
 	}
+	wg.Wait()
 }
 
 // ---------------- handle connection ----------------
@@ -207,6 +165,7 @@ func handleConn(ctx context.Context, c net.Conn, srv *ssh.ServerConfig) {
 			}
 			_ = ssh.Unmarshal(ch.ExtraData(), &p)
 			dst := fmt.Sprintf("%s:%d", p.DstHost, p.DstPort)
+
 			if opts := s.Permissions.Extensions["opts"]; opts != "" {
 				okp := false
 				for _, o := range strings.Split(opts, ",") {
@@ -221,15 +180,18 @@ func handleConn(ctx context.Context, c net.Conn, srv *ssh.ServerConfig) {
 					continue
 				}
 			}
-			v, _ := tunnels.LoadOrStore(s.User(), &struct{ c int }{})
-			tc := v.(*struct{ c int })
-			tc.c++
-			if tc.c > cfg.MaxTunnels {
-				tc.c--
+
+			tunnelsMu.Lock()
+			tunnels[s.User()]++
+			if tunnels[s.User()] > cfg.MaxTunnels {
+				tunnels[s.User()]--
+				tunnelsMu.Unlock()
 				logEvent("warn", cid, s, dst, "too many tunnels", nil, nil)
 				_ = ch.Reject(ssh.ResourceShortage, "limit")
 				continue
 			}
+			tunnelsMu.Unlock()
+
 			go proxy(ctx, cid, ch, dst, s)
 		}
 	}
@@ -239,9 +201,13 @@ func handleConn(ctx context.Context, c net.Conn, srv *ssh.ServerConfig) {
 
 func proxy(ctx context.Context, cid string, ch ssh.NewChannel, dst string, s *ssh.ServerConn) {
 	defer func() {
-		v, _ := tunnels.LoadOrStore(s.User(), &struct{ c int }{})
-		v.(*struct{ c int }).c--
+		tunnelsMu.Lock()
+		if tunnels[s.User()] > 0 {
+			tunnels[s.User()]--
+		}
+		tunnelsMu.Unlock()
 	}()
+
 	dstConn, err := net.DialTimeout("tcp", dst, cfg.DialTO)
 	if err != nil {
 		_ = ch.Reject(ssh.ConnectionFailed, err.Error())
@@ -251,9 +217,11 @@ func proxy(ctx context.Context, cid string, ch ssh.NewChannel, dst string, s *ss
 	sc, reqs, _ := ch.Accept()
 	go ssh.DiscardRequests(reqs)
 	logEvent("info", cid, s, dst, "tunnel opened", nil, nil)
+
 	done := make(chan struct{}, 2)
 	go func() { _, _ = io.Copy(dstConn, sc); done <- struct{}{} }()
 	go func() { _, _ = io.Copy(sc, dstConn); done <- struct{}{} }()
+
 	select {
 	case <-ctx.Done():
 		_ = dstConn.Close()
@@ -320,8 +288,8 @@ func evalAuthKeys(path string, key ssh.PublicKey) (*ssh.Permissions, bool) {
 
 // ---------------- utils ----------------
 
-func loadHostkeys(base string, hostKEys []string, srvCfg *ssh.ServerConfig) {
-	for _, hk := range cfg.HostKeys {
+func loadHostkeys(base string, hostKeys []string, srvCfg *ssh.ServerConfig) {
+	for _, hk := range hostKeys {
 		path := filepath.Join(base, hk)
 		b, err := os.ReadFile(path)
 		if err != nil {
@@ -368,11 +336,6 @@ func keyHash(k ssh.PublicKey) string {
 		fp = fp[:16]
 	}
 	return fmt.Sprintf("%s:%s", k.Type(), fp)
-}
-
-func pretty(v any) string {
-	b, _ := json.MarshalIndent(v, "", "  ")
-	return string(b)
 }
 
 func logEvent(lvl string, cid string, meta ssh.ConnMetadata, dst, msg string, value any, err error) {

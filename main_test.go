@@ -342,13 +342,26 @@ func runSSH(args ...string) (out string, code int) {
 }
 
 func checkSSH(t *testing.T, shouldFail bool, args ...string) {
+
 	t.Helper()
+
 	totalTests++
+
 	out, code := runSSH(args...)
+
 	cmd := "ssh " + strings.Join(args, " ")
-	if (code == 0) == shouldFail {
+
+	passed := (code == 0) != shouldFail
+	if !passed {
+
 		failedTests++
+
 		t.Errorf("❌ %s\n%s", cmd, out)
+
+		t.Logf("FAIL %s — %s", t.Name(), cmd)
+	} else {
+
+		t.Logf("PASS %s — %s", t.Name(), cmd)
 	}
 }
 
