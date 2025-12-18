@@ -11,14 +11,13 @@ volumes:
   go-build:
 
 services:
-
   bastille:
     build:
       context: ../
-      dockerfile: Dockerfile.dev
-    command: bash -c 'set -x && gow run main.go config.go'
+      dockerfile: ./test/Dockerfile
+    command: bash -c 'gow run .'
     environment:
-#      LOGLEVEL: VERBOSE
+      #      LOGLEVEL: VERBOSE
       CIPHERS: | # remove sus ciphers
         -chacha20-poly1305@openssh.com
       HOSTKEYALGORITHMS: | # remove sus host key algorithm
@@ -32,7 +31,7 @@ services:
       SMTP_USER: karloie@gmail.com
       TESTING: yes
       STRICTMODES: yes
-      MODULI_MIN: "4096"
+      MODULI_MIN: '4096'
     hostname: bastille
     networks:
       testing:
@@ -42,6 +41,7 @@ services:
     volumes:
       - ../:/app:rw
       - go-build:/root/.cache/go-build:rw
+      - ./ca:/ca:rw
       - ./home:/home:rw
       - ./hostkeys:/hostkeys:rw
       - ./smtp_pass:/run/secrets/smtp_pass:ro

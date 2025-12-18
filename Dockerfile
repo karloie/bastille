@@ -3,24 +3,24 @@ ARG VERSION
 ARG BUILD_TIME
 
 # ---- Stage 1: Build ----
-FROM golang:1.25 AS builder
+FROM golang:bookworm AS builder
 
 WORKDIR /app
 
 COPY go.* .
 RUN go mod download
 
-COPY *.go .
+COPY src src
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
     go build -trimpath -ldflags "-s -w \
     -X main.Version=${VERSION} \
     -X main.GitCommit=${GIT_COMMIT} \
     -X main.BuildTime=${BUILD_TIME}" \
-    -o bastille *.go
+        -o bastille main.go
 
 # ---- Stage 2: Run ----
 #FROM gcr.io/distroless/static-debian12:nonroot
-FROM debian:trixie-slim
+FROM alpine:3.23.0
 
 LABEL maintainer="Karl-Bjørnar Øie <karloie@gmail.com>"
 
@@ -52,14 +52,12 @@ ENV SMTP_PASS_FILE="/run/secrets/smtp_pass"
 ENV SMTP_PORT="587"
 ENV SMTP_USER=""
 
-ENV MODULI_MIN=""
-
-ENV AUTHBASE="/home"
-ENV AUTHKEYS="{user},{user}/.ssh/authorized_keys"
-ENV CERTBASE="/ca"
-ENV CERTKEYS="ca1.pub,ca2.pub"
-ENV HOSTBASE="/hostkeys"
-ENV HOSTKEYS="ssh_host_ed25519_key,ssh_host_rsa_key"
+ENV AUTH_BASE="/home"
+ENV AUTH_KEYS="{user},{user}/.ssh/authorized_keys"
+ENV CERT_BASE="/ca"
+ENV CERT_KEYS="ca1.pub,ca2.pub"
+ENV HOST_BASE="/hostkeys"
+ENV HOST_KEYS="ssh_host_ed25519_key,ssh_host_rsa_key"
 ENV DEBUG="false"
 
 WORKDIR /app

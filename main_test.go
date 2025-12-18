@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -32,7 +33,7 @@ func TestMain(m *testing.M) {
 
 	testMode = os.Getenv("TEST_MODE")
 	if testMode == "" {
-		if dockerIsRunning() {
+		if _, err:=dockerIsRunning(); err != nil {
 			testMode = "attach"
 		} else {
 			testMode = "full"
@@ -244,31 +245,37 @@ func copyFile(src, dst string) error {
 // ────────────────────────────────
 // Docker Compose Lifecycle
 // ────────────────────────────────
-func dockerIsRunning() bool {
-	cmd := exec.Command("docker", "compose", "-f", "test/docker-compose.yml", "ps", "--status", "running", "-q")
+func dockerCompose(args ...string) (string, error) {
+	subcmd := []string{"compose", "-f", "test/docker-compose.yml"}
+	cmd := exec.Command("docker", slices.Concat(subcmd, args)...)
 	out, _ := cmd.Output()
-	return len(bytes.TrimSpace(out)) > 0
+	return string(bytes.TrimSpace(out)), nil
+}
+
+func dockerIsRunning() (string, error) {
+	return dockerCompose("ps", "--status", "running", "-q")
 }
 
 func startDocker() {
-	fmt.Println("🚀 Starting Docker environment...")
-	cmd := exec.Command("docker", "compose", "-f", "test/docker-compose.yml",
-		"up", "-d", "--build", "--remove-orphans")
-	out, err := cmd.CombinedOutput()
+	fmt.Println("🚀 docker service start")
+	out, err := dockerCompose("up", "-d", "--build", "--remove-orphans")
 	if err != nil {
 		panic("failed to start docker compose:\n" + string(out))
 	}
-
 	startLogStream()
-	fmt.Println("🟢 Docker environment up. Waiting for services to stabilize...")
+	fmt.Println("🟢 docker service up")
 	time.Sleep(4 * time.Second)
 	waitForSSH()
+	fmt.Println("🟢 ssh services up")
 }
 
 func stopDocker() {
 	fmt.Println("🛑 Shutting down docker environment...")
 	stopLogStream()
-	exec.Command("docker", "compose", "-f", "test/docker-compose.yml", "down", "--remove-orphans").Run()
+	out, err := dockerCompose("down", "--remove-orphans")
+	if err != nil {
+		panic("failed to stop docker compose:\n" + string(out))
+	}
 }
 
 // ────────────────────────────────
@@ -342,26 +349,16 @@ func runSSH(args ...string) (out string, code int) {
 }
 
 func checkSSH(t *testing.T, shouldFail bool, args ...string) {
-
 	t.Helper()
-
 	totalTests++
-
-	out, code := runSSH(args...)
-
+	_, code := runSSH(args...)
 	cmd := "ssh " + strings.Join(args, " ")
-
 	passed := (code == 0) != shouldFail
-	if !passed {
-
-		failedTests++
-
-		t.Errorf("❌ %s\n%s", cmd, out)
-
-		t.Logf("FAIL %s — %s", t.Name(), cmd)
+	if passed {
+		t.Logf("✅ PASS %s: %s", t.Name(), cmd)
 	} else {
-
-		t.Logf("PASS %s — %s", t.Name(), cmd)
+		t.Errorf("🛑 FAIL %s: %s", t.Name(), cmd)
+		failedTests++
 	}
 }
 

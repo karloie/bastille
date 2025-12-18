@@ -14,14 +14,14 @@ import (
 
 // Config holds all runtime settings for Bastille
 type Config struct {
-	Listen       string
-	AuthBase     string
-	AuthKeys     []string
-	AuthMode     string
-	CertBase     string
-	CertKeys     []string
-	HostBase     string
-	HostKeys     []string
+	ADDRESS      string
+	AUTH_BASE    string
+	AUTH_KEYS    []string
+	AUTH_MODE    string
+	CERT_BASE    string
+	CERT_KEYS    []string
+	HOST_BASE    string
+	HOST_KEYS    []string
 	MaxTunnels   int
 	RateLimit    int
 	DialTO       time.Duration
@@ -36,14 +36,14 @@ func LoadConfig() Config {
 	algos := getSupportedAlgos()
 
 	return Config{
-		Listen:       envStr("LISTEN", ":22222"),
-		AuthBase:     envStr("AUTHBASE", "test/home"),
-		AuthKeys:     splitList(envStr("AUTHKEYS", "{user},.ssh/authorized_keys")),
-		AuthMode:     envStr("AUTHMODE", "optional"),
-		CertBase:     envStr("CERTBASE", "test/ca"),
-		CertKeys:     splitList(envStr("CERTKEYS", "ca_ed25519_nani.pub")),
-		HostBase:     envStr("HOSTBASE", "test/hostkeys"),
-		HostKeys:     splitList(envStr("HOSTKEYS", "ssh_host_ed25519_key,ssh_host_rsa_key")),
+		ADDRESS:      envStr("LISTEN", ":22222"),
+		AUTH_BASE:    envStr("AUTH_BASE", "test/home"),
+		AUTH_KEYS:    splitList(envStr("AUTH_KEYS", "{user},.ssh/authorized_keys")),
+		AUTH_MODE:    envStr("AUTHMODE", "optional"),
+		CERT_BASE:    envStr("CERT_BASE", "test/ca"),
+		CERT_KEYS:    splitList(envStr("CERT_KEYS", "ca_ed25519_nani.pub")),
+		HOST_BASE:    envStr("HOST_BASE", "test/hostkeys"),
+		HOST_KEYS:    splitList(envStr("HOST_KEYS", "ssh_host_ed25519_key,ssh_host_rsa_key")),
 		MaxTunnels:   envInt("MAX_TUNNELS", 5),
 		RateLimit:    envInt("RATE", 10),
 		DialTO:       5 * time.Second,

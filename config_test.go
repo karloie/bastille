@@ -14,8 +14,8 @@ func TestLoadConfigDefaults(t *testing.T) {
 
 	cfg := LoadConfig()
 
-	if cfg.Listen != ":22222" {
-		t.Errorf("expected default Listen :22222, got %s", cfg.Listen)
+	if cfg.ADDRESS != ":22222" {
+		t.Errorf("expected default Listen :22222, got %s", cfg.ADDRESS)
 	}
 	if cfg.MaxTunnels != 5 {
 		t.Errorf("expected default MaxTunnels=5, got %d", cfg.MaxTunnels)
@@ -37,8 +37,8 @@ func TestEnvOverrides(t *testing.T) {
 
 	cfg := LoadConfig()
 
-	if cfg.Listen != "0.0.0.0:10022" {
-		t.Errorf("LISTEN override failed, got %s", cfg.Listen)
+	if cfg.ADDRESS != "0.0.0.0:10022" {
+		t.Errorf("LISTEN override failed, got %s", cfg.ADDRESS)
 	}
 	if cfg.MaxTunnels != 9 {
 		t.Errorf("MAX_TUNNELS override failed, got %d", cfg.MaxTunnels)

@@ -54,11 +54,11 @@ func main() {
 		MACs:         cfg.MACs,
 	}}
 
-	loadHostkeys(cfg.HostBase, cfg.HostKeys, srv)
-	caPub := loadCertkeys(cfg.CertBase, cfg.CertKeys)
-	certChecker := certChecker(caPub, cfg.AuthKeys)
+	loadHostkeys(cfg.HOST_BASE, cfg.HOST_KEYS, srv)
+	caPub := loadCaKeys(cfg.CERT_BASE, cfg.CERT_KEYS)
+	certChecker := certChecker(caPub, cfg.AUTH_KEYS)
 	srv.PublicKeyCallback = func(meta ssh.ConnMetadata, key ssh.PublicKey) (*ssh.Permissions, error) {
-		if cfg.AuthMode == "certs" {
+		if cfg.AUTH_MODE == "certs" {
 			if _, ok := key.(*ssh.Certificate); !ok {
 				return nil, errors.New("cert required")
 			}
@@ -72,7 +72,7 @@ func main() {
 		return perms, nil
 	}
 
-	ln, err := net.Listen("tcp", cfg.Listen)
+	ln, err := net.Listen("tcp", cfg.ADDRESS)
 	if err != nil {
 		log.Fatal().Err(err).Msg("listen failed")
 	}
@@ -249,7 +249,7 @@ func certChecker(caPub []ssh.PublicKey, authFiles []string) *ssh.CertChecker {
 		UserKeyFallback: func(conn ssh.ConnMetadata, pubKey ssh.PublicKey) (*ssh.Permissions, error) {
 			user := regexp.MustCompile(`[^a-zA-Z0-9._-]`).ReplaceAllString(conn.User(), "")
 			for _, tmpl := range authFiles {
-				path := filepath.Join(cfg.AuthBase, strings.ReplaceAll(tmpl, "{user}", user))
+				path := filepath.Join(cfg.AUTH_BASE, strings.ReplaceAll(tmpl, "{user}", user))
 				if perm, ok := evalAuthKeys(path, pubKey); ok {
 					return perm, nil
 				}
@@ -293,35 +293,35 @@ func loadHostkeys(base string, hostKeys []string, srvCfg *ssh.ServerConfig) {
 		path := filepath.Join(base, hk)
 		b, err := os.ReadFile(path)
 		if err != nil {
-			logEvent("warn", "", nil, path, "Host key read failed", nil, err)
+			logEvent("warn", "", nil, path, "host key read failed📍", nil, err)
 			continue
 		}
 		s, err := ssh.ParsePrivateKey(b)
 		if err != nil {
-			logEvent("warn", "", nil, path, "Host key parse failed", nil, err)
+			logEvent("warn", "", nil, path, "host key parse failed📍", nil, err)
 			continue
 		}
 		srvCfg.AddHostKey(s)
-		logEvent("info", "", nil, path, "Host key loaded", nil, err)
+		logEvent("info", "", nil, path, "host key loaded💡", nil, err)
 	}
 }
 
-func loadCertkeys(base string, paths []string) []ssh.PublicKey {
+func loadCaKeys(base string, paths []string) []ssh.PublicKey {
 	out := make([]ssh.PublicKey, 0, len(paths))
 	for _, p := range paths {
 		path := filepath.Join(base, p)
 		b, err := os.ReadFile(path)
 		if err != nil {
-			logEvent("warn", "", nil, path, "Cert key read failed", nil, err)
+			logEvent("warn", "", nil, path, "read error📍", nil, err)
 			continue
 		}
 		pub, _, _, _, err := ssh.ParseAuthorizedKey(b)
 		if err != nil {
-			logEvent("warn", "", nil, path, "Cert key parse failed", nil, err)
+			logEvent("warn", "", nil, path, "parse error📍", nil, err)
 			continue
 		}
 		out = append(out, pub)
-		logEvent("info", "", nil, path, "Cert key loaded", nil, err)
+		logEvent("info", "", nil, path, "ca key loaded💡", nil, err)
 	}
 	return out
 }
