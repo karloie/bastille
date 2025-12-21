@@ -1,26 +1,19 @@
 # Bastille
 
-Bastille is a [cryptographically hardened](https://www.sshaudit.com/hardening_guides.html#ubuntu_24_04_lts), and reasonably secure, [SSH jump server](https://en.wikipedia.org/wiki/Jump_server) application of [OpenSSH-Server](https://www.openssh.com). 
-The project is named after the famous fortress in Paris, known as the [Bastille Saint-Antoine](https://en.wikipedia.org/wiki/Bastille). It was stormed and sacked by a crowd on 14 July 1789, during the French Revolution.
+Bastille is a simple SSH jump server written in Go, named after the famous French fortress in Paris, the Bastille Saint-Antoine—famously stormed and sacked during the French Revolution.
 
 ![overview](doc/bastille.jpg)
 
-This project was made because I needed a SSH jump server myself, and saw an opportunity to learn more about SSH in general. You probably don't want to use this server for other than "educational purposes", as it comes with no warranty what so ever. However if you do, feel free give me feedback.
-
-## Features
-
-- SSH jump server with [hardened defaults](https://www.sshaudit.com/hardening_guides.html#ubuntu_24_04_lts).
-- Small and lightweight [Alpine Linux](https://www.alpinelinux.org).
-- SSH public key access only with allowed hosts list.
-- Easy deployment.
+- Hardened cryptographic defaults (based on [sshaudit.com](https://www.sshaudit.com/hardening_guides.html)).
+- Single binary Go executable.
 
 ## Usage
 
-The jump server should be deployed between two networks in a *rootless* container host like [Podman](https://podman.io/) or [Docker](https://docs.docker.com/engine/security/rootless/) and secured by a firewall. Securing the host machine itself is beyond the scope of this project.
+Deploy between networks on a rootless Docker or Podman host and secure it with a firewall.
 
-### User access configuration
+### User access
 
-First create a directory with a file named for each user you want to allow. As no shell is allowed these users can be used as access groups and does not have to match a real user. Each user named file will act as the `authorized_keys` file for the SSH authentication. This directory should be mounted onto the path `/home` in the container. 
+Create a `home/` directory with one file per allowed user; each file is that user's `authorized_keys`. Mount it at `/home` (read-only). Use `permitopen` to restrict destinations per key.
 
 ```
 home/
@@ -29,22 +22,23 @@ home/
 ```
 
 Example content for file `lilo`:
+
 ```
 permitopen="172.16.4.12:22",permitopen="172.16.4.13:22" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIE2AwAOD0CjqmxGvstxApYZLg+oji5zMDpyxb0FS7Uw/ lilo@localhost
 ```
 
 Example content for file `stitch`:
+
 ```
 permitopen="172.16.4.13:22" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMXLNYeiSxUg23XlqXj33yJG2iKF5dd9+DmeUM3JGte/ stitch@localhost
 ```
 
-Here we allow the `lilo@localhost` key to access both `172.16.4.12:22` and `172.16.4.13:22`, while the `stitch@localhost` key can only access `172.16.4.13:22`. Please RTFM at [ssh.com](https://www.ssh.com/academy/ssh/authorized-keys-openssh#format-of-the-authorized-keys-file) for information about the `authorized_keys` file format.
+The `lilo` key allows 172.16.4.12:22 and 172.16.4.13:22; `stitch` only 172.16.4.13:22.
+Target hosts must also be configured with SSH public keys for the users (these need not be the same keys used on the jump server).
 
-The target hosts must also be configured with public SSH keys for the users. These public keys should not necessarily be the same as the keys used on the jump server.
+### Host keys
 
-### Host identity configuration
-
-Secondly create a directory with the SSH server's host keys. This directory should be mounted onto the path `/hostkeys` in the container. This mount must be writable.
+Create a writable `hostkeys/` directory and mount it at `/hostkeys` in the container. Generate keys with `ssh-keygen` (e.g., `ssh-keygen -t ed25519 -f hostkeys/ssh_host_ed25519_key -N ""`). Ensure private keys are not group- or world-readable.
 
 ```
 hostkeys/
@@ -54,16 +48,21 @@ hostkeys/
 └── ssh_host_rsa_key.pub
 ```
 
-If these keys doesn't exist the server will generate them on startup. So for the first run you can leave this directory empty.
+If an ed25519 key is missing at startup, Bastille generates and persists it under `/hostkeys` (and writes the matching `.pub`). You may provide additional key types if desired. The server refuses to start if no host keys can be loaded or generated.
 
-### Runtime configuration
+### Runtime
 
-Finally create a `docker-compose.yml` file for deployment, and run `docker compose up`
+Create a `docker-compose.yml`, then run `docker compose up -d`.
 
 ```yaml
 services:
   bastille:
-    image: karloie/bastille:latest
+    image: karloie/bastille:0.1.0
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     ports:
       - 22222:22222/tcp
     read_only: true
@@ -75,7 +74,7 @@ services:
       - ./hostkeys:/hostkeys:rw
 ```
 
-Now you should be able to access your target hosts through the jump server.
+You can now access target hosts through the jump server.
 
 ```bash
 ssh root@172.16.4.12 -J lilo@127.0.0.1:22222
@@ -84,69 +83,101 @@ ssh root@172.16.4.13 -J stitch@127.0.0.1:22222
 
 ### Email notification
 
-Configure the SMTP parameters if you want an email sent for each successful SSH jump. The SMTP parameters are regular environment variables except for SMTP_PASS_FILE which should be the path to a file with the SMTP password, not the password it self.
+Configure `SMTP_*` to send an email on each successful SSH jump. Use `SMTP_PASS_FILE` to point to a mounted password file (default `/run/secrets/smtp_pass`). See Configuration for all `SMTP_*` variables.
 
-The default is `/run/secrets/smtp_pass` and should be mounted onto the container. Look at the `test/docker-compose.yml` file as an example.
-
-### Environment variables
+### Configuration (env vars)
 
 The jump server can be configured further with these environment variables.
 
-#### Server parameters.
-| Name               | Default | Description             |
-| -------------------| :-----: | ------------------------|
-| LISTEN_PORT        | 22222    | Listening port          |
-| LOGLEVEL           | INFO    | Loging level         (INFO\|VERBOSE\|DEBUG)   |
-| TESTING            | no     | Testing (yes\|no)   |
-| STRICTMODES        | no     | If set to yes, the UID of /home entries are strictly enforced |
-| MODULI_MIN         |        | If set to a number like 2048, smaller sized moduli are filtered out |
+#### Server parameters
 
-#### SSHD [sshd_config](https://www.ssh.com/academy/ssh/sshd_config) parameters.
-| Name              | Default | Description                  |
-| ----------------- | :-----: | -----------------------------|
-| AGENT_FORWARDING  | no      | Permit agent forwarding      |
-| GATEWAY_PORTS     | no      | Permit gateway ports         |
-| PERMIT_TUNNEL     | no      | Permit tunnelling            |
-| TCP_FORWARDING    | yes     | Permit TCP forwarding        |
-| X11_FORWARDING    | no      | Permit X11 forwarding        |
+- Set `LISTEN` (e.g., `0.0.0.0:22222`) or `LISTEN_PORT` (default `22222`).
+- MAX_TUNNELS: 5 per user (default)
+- `RATE`: 10 connection attempts per IP per minute (default).
+- LOGLEVEL: INFO|VERBOSE|DEBUG (default INFO)
+- TESTING: yes|no (default no)
+- `STRICTMODES`: enforces safe permissions on `AUTH_BASE` files (default `no`).
+- MODULI_MIN: optional (e.g., 2048)
 
-#### Crypto parameters with hardened defaults from [sshaudit.com](https://www.sshaudit.com/hardening_guides.html#ubuntu_24_04_lts).
-| Name                        | Default |
-| --------------------------- | :-----: |
-| CASIGNATUREALGORITHMS       |    ..   |
-| CIPHERS                     |    ..   |
-| HOSTBASEDACCEPTEDALGORITHMS |    ..   |
-| HOSTKEYALGORITHMS           |    ..   |
-| KEXALGORITHMS               |    ..   |
-| MACS                        |    ..   |
-| PUBKEYACCEPTEDALGORITHMS    |    ..   |
-| REQUIREDRSASIZE             |   3072  |
+#### SSHD parameters ([sshd_config](https://www.ssh.com/academy/ssh/sshd_config))
 
-#### SMTP parameters.
-| Name      | Default | Description           |
-| --------- | :-----: | --------------------- |
-| SMTP_HOST |         | SMTP hostname or IP   |
-| SMTP_MAIL |         | Senders email address |
-| SMTP_PORT |  587    | SMTP port             |
-| SMTP_USER |         | SMTP username         |
-| SMTP_PASS_FILE | /run/secrets/smtp_pass | Path to password file |
+- AGENT_FORWARDING: no
+- GATEWAY_PORTS: no
+- PERMIT_TUNNEL: no
+- TCP_FORWARDING: yes
+- X11_FORWARDING: no
 
+#### Crypto parameters
+Hardened lists are applied by default; override via env vars (full lists, +additions, -removals). Defaults favor modern algorithms; legacy algorithms are disabled. See the [sshaudit hardening guides](https://www.sshaudit.com/hardening_guides.html).
+- CASIGNATUREALGORITHMS, CIPHERS, HOSTBASEDACCEPTEDALGORITHMS, HOSTKEYALGORITHMS, KEXALGORITHMS, MACS, PUBKEYACCEPTEDALGORITHMS
+- REQUIREDRSASIZE: default 3072
+
+#### SMTP parameters
+
+- SMTP_HOST: host
+- SMTP_MAIL: sender address
+- SMTP_PORT: 587 (default)
+- SMTP_USER: username
+- SMTP_PASS_FILE: path to password file (default /run/secrets/smtp_pass)
 
 ## Development
 
-You can use the `dev.sh` script if you for some strange reason want to develop this project.
+### Prerequisites
 
-Start the server in development mode:
+- Go 1.24+
+- Make
+
+### Building
+
 ```bash
-./dev.sh up
+make build
 ```
 
-Run the tests from another shell:
+This produces a `bastille` binary in the project root.
+
+### Testing
+
+The project uses pure Go tests with no Docker dependencies:
+
 ```bash
-./dev.sh test all
+# Generate test data and run all tests
+make test
+
+# Or step by step
+make test-setup  # Generate SSH keys and test data
+go test -v ./...
 ```
 
-Execute a shell in the container:
+All test data is generated in `./test/` and can be cleaned with:
+
 ```bash
-./dev.sh exec
+make clean
 ```
+
+### Project Structure
+
+```
+bastille/
+├── app/              # Main application code
+│   ├── auth.go       # SSH authentication
+│   ├── config.go     # Configuration management
+│   ├── crypto.go     # Key loading and crypto utils
+│   ├── main.go       # Server and proxy logic
+│   ├── notify.go     # Email notifications
+│   └── test-setup/   # Test data generation
+├── test/             # Generated test data (gitignored)
+├── doc/              # Documentation
+├── Dockerfile        # Production container image
+└── Makefile          # Build automation
+```
+
+### Running Tests
+
+Tests use fixed ports (22222, 22223, 22224) and run serially (`-p 1`) to avoid conflicts. Test data includes:
+
+- SSH keys for test users (lilo, stitch, certuser)
+- CA keys and certificates
+- Host keys for mock SSH servers
+- Authorized keys with `permitopen` restrictions
+
+License: see `doc/LICENSE`.

@@ -1,0 +1,337 @@
+//go:build ignore
+
+package main
+
+import (
+	"bufio"
+	"crypto/ed25519"
+	"crypto/rand"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"golang.org/x/crypto/ssh"
+)
+
+func main() {
+	mode := "setup"
+	if len(os.Args) > 1 {
+		mode = os.Args[1]
+	}
+	switch mode {
+	case "setup":
+		if err := generateTestData(); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+	case "fmt", "format":
+		if err := runFormatter(); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+	default:
+		fmt.Fprintf(os.Stderr, "Unknown mode %q. Use: setup|fmt\n", mode)
+		os.Exit(2)
+	}
+}
+
+func generateTestData() error {
+	caPub, caPriv, _ := ed25519.GenerateKey(rand.Reader)
+	hostPub, hostPriv, _ := ed25519.GenerateKey(rand.Reader)
+	liloPub, liloPriv, _ := ed25519.GenerateKey(rand.Reader)
+	stitchPub, stitchPriv, _ := ed25519.GenerateKey(rand.Reader)
+	certuserPub, certuserPriv, _ := ed25519.GenerateKey(rand.Reader)
+
+	caSigner := mustSigner(caPriv)
+	liloSigner := mustSigner(liloPriv)
+	stitchSigner := mustSigner(stitchPriv)
+
+	if err := os.MkdirAll(filepath.Join("test", "ca"), 0755); err != nil {
+		return fmt.Errorf("mkdir test/ca: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Join("test", "hostkeys"), 0755); err != nil {
+		return fmt.Errorf("mkdir test/hostkeys: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Join("test", "home", "lilo"), 0755); err != nil {
+		return fmt.Errorf("mkdir test/home/lilo: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Join("test", "home", "stitch"), 0755); err != nil {
+		return fmt.Errorf("mkdir test/home/stitch: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Join("test", "home", "certuser"), 0755); err != nil {
+		return fmt.Errorf("mkdir test/home/certuser: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Join("test", "keys"), 0755); err != nil {
+		return fmt.Errorf("mkdir test/keys: %w", err)
+	}
+
+	caPath := filepath.Join("test", "ca", "ca.pub")
+	if err := os.WriteFile(caPath, ssh.MarshalAuthorizedKey(caSigner.PublicKey()), 0644); err != nil {
+		return fmt.Errorf("write CA key: %w", err)
+	}
+	fmt.Printf("🔑 %s\n", caPath)
+
+	hostKeyPath := filepath.Join("test", "hostkeys", "ssh_host_ed25519_key")
+	if err := writeSSHPrivateKey(hostKeyPath, hostPriv); err != nil {
+		return fmt.Errorf("write host key: %w", err)
+	}
+	fmt.Printf("🔐 %s\n", hostKeyPath)
+
+	liloAuth := fmt.Sprintf(
+		`permitopen="127.0.0.1:*" %s`,
+		string(ssh.MarshalAuthorizedKey(liloSigner.PublicKey())),
+	)
+	liloPath := filepath.Join("test", "home", "lilo", "authorized_keys")
+	if err := os.WriteFile(liloPath, []byte(liloAuth), 0644); err != nil {
+		return fmt.Errorf("write lilo auth: %w", err)
+	}
+	fmt.Printf("📜 %s\n", liloPath)
+
+	stitchAuth := fmt.Sprintf(
+		`permitopen="127.0.0.1:*" %s`,
+		string(ssh.MarshalAuthorizedKey(stitchSigner.PublicKey())),
+	)
+	stitchPath := filepath.Join("test", "home", "stitch", "authorized_keys")
+	if err := os.WriteFile(stitchPath, []byte(stitchAuth), 0644); err != nil {
+		return fmt.Errorf("write stitch auth: %w", err)
+	}
+	fmt.Printf("📜 %s\n", stitchPath)
+
+	certuserAuth := fmt.Sprintf(`permitopen="127.0.0.1:*" `)
+	certuserPath := filepath.Join("test", "home", "certuser", "authorized_keys")
+	if err := os.WriteFile(certuserPath, []byte(certuserAuth), 0644); err != nil {
+		return fmt.Errorf("write certuser auth: %w", err)
+	}
+	fmt.Printf("📜 %s\n", certuserPath)
+
+	keysDir := filepath.Join("test", "keys")
+
+	keys := map[string]struct {
+		priv ed25519.PrivateKey
+		pub  ed25519.PublicKey
+	}{
+		"ca_key":       {caPriv, caPub},
+		"lilo_key":     {liloPriv, liloPub},
+		"stitch_key":   {stitchPriv, stitchPub},
+		"certuser_key": {certuserPriv, certuserPub},
+		"host_key":     {hostPriv, hostPub},
+	}
+
+	for name, key := range keys {
+		privPath := filepath.Join(keysDir, name)
+		hexKey := hex.EncodeToString(key.priv)
+		if err := os.WriteFile(privPath, []byte(hexKey), 0600); err != nil {
+			return fmt.Errorf("write %s: %w", name, err)
+		}
+		fmt.Printf("🔐 %s\n", privPath)
+
+		pubPath := privPath + ".pub"
+		signer := mustSigner(key.priv)
+		if err := os.WriteFile(pubPath, ssh.MarshalAuthorizedKey(signer.PublicKey()), 0644); err != nil {
+			return fmt.Errorf("write %s.pub: %w", name, err)
+		}
+		fmt.Printf("🔑 %s\n", pubPath)
+	}
+
+	return nil
+}
+
+func writeSSHPrivateKey(path string, key ed25519.PrivateKey) error {
+	hexKey := hex.EncodeToString(key)
+	return os.WriteFile(path, []byte(hexKey), 0600)
+}
+
+func mustSigner(key ed25519.PrivateKey) ssh.Signer {
+	signer, err := ssh.NewSignerFromKey(key)
+	if err != nil {
+		panic(err)
+	}
+	return signer
+}
+
+type event struct {
+	Time    time.Time `json:"Time"`
+	Action  string    `json:"Action"`
+	Package string    `json:"Package"`
+	Test    string    `json:"Test,omitempty"`
+	Elapsed float64   `json:"Elapsed,omitempty"`
+	Output  string    `json:"Output,omitempty"`
+}
+
+func runFormatter() error {
+	sc := bufio.NewScanner(os.Stdin)
+	sc.Buffer(make([]byte, 0, 64*1024), 10*1024*1024)
+
+	totalPass := 0
+	totalFail := 0
+	totalSkip := 0
+	seenPkgs := map[string]struct{}{}
+	anyFailure := false
+
+	for sc.Scan() {
+		line := sc.Bytes()
+		if len(strings.TrimSpace(string(line))) == 0 {
+			continue
+		}
+		var e event
+		if err := json.Unmarshal(line, &e); err != nil {
+			fmt.Println(string(line))
+			continue
+		}
+		if e.Package != "" {
+			seenPkgs[e.Package] = struct{}{}
+		}
+
+		switch e.Action {
+		case "run":
+		case "output":
+			txt := strings.TrimSuffix(e.Output, "\n")
+			if isHarnessNoise(txt) {
+				continue
+			}
+			if e.Test != "" {
+				indent := indentFor(e.Test)
+				fmt.Printf("%s[%s] %s\n", indent, e.Test, txt)
+			} else {
+				fmt.Println(txt)
+			}
+		case "pass":
+			if e.Test != "" {
+				totalPass++
+				indent := indentFor(e.Test)
+				fmt.Printf("%s\033[32mPASS\033[0m %s (%s)\n", indent, label(e.Package, e.Test), fmtElapsed(e.Elapsed))
+			} else {
+				fmt.Printf("\033[32mPASS\033[0m package %s (%s)\n", e.Package, fmtElapsed(e.Elapsed))
+			}
+		case "fail":
+			if e.Test != "" {
+				totalFail++
+				anyFailure = true
+				indent := indentFor(e.Test)
+				fmt.Printf("%s\033[31mFAIL\033[0m %s (%s)\n", indent, label(e.Package, e.Test), fmtElapsed(e.Elapsed))
+			} else {
+				anyFailure = true
+				fmt.Printf("\033[31mFAIL\033[0m package %s (%s)\n", e.Package, fmtElapsed(e.Elapsed))
+			}
+		case "skip":
+			if e.Test != "" {
+				totalSkip++
+				indent := indentFor(e.Test)
+				fmt.Printf("%s\033[33mSKIP\033[0m %s\n", indent, label(e.Package, e.Test))
+			} else {
+				fmt.Printf("\033[33mSKIP\033[0m package %s\n", e.Package)
+			}
+		}
+	}
+
+	pkgCount := len(seenPkgs)
+	fmt.Printf("\nSummary: \033[32mPASS\033[0m %d  \033[31mFAIL\033[0m %d  \033[33mSKIP\033[0m %d  in %d package(s)\n", totalPass, totalFail, totalSkip, pkgCount)
+
+	if err := sc.Err(); err != nil {
+		return err
+	}
+	if anyFailure {
+		os.Exit(1)
+	}
+	return nil
+}
+
+func indentFor(test string) string {
+	if test == "" {
+		return ""
+	}
+	level := strings.Count(test, "/")
+	if level <= 0 {
+		return ""
+	}
+	return strings.Repeat("  ", level)
+}
+
+func label(pkg, test string) string {
+	if pkg == "" {
+		return test
+	}
+	return fmt.Sprintf("%s %s", pkg, test)
+}
+
+func fmtElapsed(sec float64) string {
+	if sec <= 0 {
+		return "0s"
+	}
+	d := time.Duration(sec * float64(time.Second))
+	if d < time.Second {
+		return fmt.Sprintf("%dms", d.Milliseconds())
+	}
+	return fmt.Sprintf("%.2fs", d.Seconds())
+}
+
+func isHarnessNoise(line string) bool {
+	if strings.HasPrefix(line, "=== RUN   ") {
+		return true
+	}
+	if strings.HasPrefix(line, "=== PAUSE ") {
+		return true
+	}
+	if strings.HasPrefix(line, "=== CONT  ") {
+		return true
+	}
+	if strings.HasPrefix(line, "--- PASS: ") {
+		return true
+	}
+	if strings.HasPrefix(line, "--- FAIL: ") {
+		return true
+	}
+	if strings.HasPrefix(line, "--- SKIP: ") {
+		return true
+	}
+	if strings.HasPrefix(line, "ok  ") || strings.HasPrefix(line, "FAIL\t") {
+		return true
+	}
+	return false
+}
+
+func decorateLog(test, txt string) (string, string) {
+	lower := strings.ToLower(txt)
+
+	switch {
+	case strings.Contains(lower, "mock target listening"):
+		return "🎯", txt
+
+	case strings.Contains(lower, "bastille (cert-only) listening (test)"):
+		return "🏰🔐", txt
+	case strings.Contains(lower, "bastille listening (test)"):
+		return "🏰", txt
+
+	case strings.Contains(lower, "tunnel opened"):
+		return "🔗", txt
+	case strings.Contains(lower, "tunnel denied"):
+		return "⛔", txt
+	case strings.Contains(lower, "too many tunnels"):
+		return "🚫🔗", txt
+	case strings.Contains(lower, "rate limited"):
+		return "🚦", txt
+
+	case strings.Contains(lower, "dial failed"):
+		return "📵", txt
+	case strings.Contains(lower, "handshake failed"):
+		return "🤝❌", txt
+	case strings.Contains(lower, "handshake"):
+		return "🤝", txt
+
+	case strings.Contains(lower, "smtp"):
+		return "📧", txt
+
+	case strings.Contains(lower, "host key "):
+		return "🔐", txt
+	case strings.Contains(lower, "host public key"):
+		return "🔑", txt
+	case strings.Contains(lower, "ca key"):
+		return "🔑", txt
+	}
+
+	return "📝", txt
+}

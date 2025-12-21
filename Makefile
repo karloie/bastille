@@ -1,48 +1,40 @@
-# Simple Makefile for building and testing the Go project
-
-SHELL := sh
-
-GO        ?= go
-PKG       := ./...
-BINARY    ?= bastille
-BUILD_DIR ?= .
-LDFLAGS   ?= -s -w
-
-.DEFAULT_GOAL := build
+.DEFAULT_GOAL := help
 
 
 
-.PHONY: all build test test-race cover fmt vet tidy clean gow down
+.PHONY: help build test test-setup coverage clean
 
+help: ## Show this help message
+	@echo "Bastille - SSH Bastion Server"
+	@echo ""
+	@echo "Usage: make [target]"
+	@echo ""
+	@echo "Targets:"
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-15s %s\n", $$1, $$2}'
 
+clean: ## Remove build artifacts and test data
+	@rm -f bastille *.test coverage.out coverage.html
+	@rm -rf test/ca test/hostkeys test/home test/smtp_pass test/keys
+	@echo "✨ Cleaned test data!"
 
-all: build
+test-setup: ## Generate test data (keys, authorized_keys, etc.)
+	@go run ./app/test_setup.go
 
-tidy:
-	$(GO) mod tidy
+test: test-setup ## Run all tests
+	@out=$$(mktemp); \
+	go test -json ./app/... | tee $$out | go run ./app/test_setup.go fmt || { echo "⚠️ pretty formatter failed; showing raw output"; cat $$out; }; \
+	rm -f $$out
 
-clean:
-	docker rm --force test-bastille-1 test-target1-1 test-target2-1 || true
-	docker network rm --foprbastille_testing || true
-	$(GO) clean
-	rm -fv $(BUILD_DIR)/$(BINARY)
+build: ## Build the bastille binary
+	@go build -o bastille ./app
 
-dev: clean
-	docker compose -f test/docker-compose.yml down --remove-orphans
-	docker compose -f test/docker-compose.yml up -d --build --remove-orphans
-	docker compose -f test/docker-compose.yml logs -f
-
-fmt:
-	$(GO) fmt *.go
-
-gow:
-	gow run *.go
-
-test:
-	$(GO) test *.go -v
-
-cover:
-	$(GO) test -cover *.go
-
-build:
-	$(GO) build *.go
+coverage: ## Generate test coverage report with detailed breakdown
+	@echo "📊 Generating coverage report..."
+	@go test -coverprofile=coverage.out -covermode=atomic ./...
+	@go tool cover -func=coverage.out | grep -v "total:" | awk '{printf "  %-50s %8s\n", $$1":"$$2, $$3}'
+	@echo ""
+	@go tool cover -func=coverage.out | grep total | awk '{print "=== Total Coverage: " $$3 " ==="}'
+	@echo ""
+	@go tool cover -html=coverage.out -o coverage.html
+	@echo "📄 HTML report generated: coverage.html"
+	@echo "💡 Run 'open coverage.html' to view in browser"

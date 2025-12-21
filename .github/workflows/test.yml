@@ -1,96 +1,21 @@
-name: Go Integration Tests
+name: Test
 
 on:
-    push:
-        branches: [main]
-    pull_request:
-        branches: [main]
+  workflow_call:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
 
 jobs:
-    test:
-        runs-on: ubuntu-latest
-
-        permissions:
-            contents: read
-
-        env:
-            CGO_ENABLED: 0
-            GO111MODULE: on
-
-        steps:
-            - name: 🧾 Checkout repository
-              uses: actions/checkout@v4
-
-            - name: 🧰 Set up Go
-              uses: actions/setup-go@v5
-              with:
-                  go-version-file: go.mod
-
-            - name: 🐋 Set up Docker Compose
-              run: |
-                  docker compose version || sudo apt-get update && sudo apt-get install -y docker-compose-plugin
-
-            - name: 🧼 Clean old test state
-              run: |
-                  rm -rf test/ca test/clientkeys test/hostkeys test/home test/target1/.ssh test/target2/.ssh || true
-
-            - name: 🔨 Run integration tests
-              id: run-tests
-              run: |
-                  set -euxo pipefail
-                  mkdir -p artifacts
-                  go test -v ./... 2>&1 | tee artifacts/go_test_output.txt
-
-            # ────────────────────────────────
-            # Collect Docker + SSH context if tests fail
-            # ────────────────────────────────
-            - name: 📜 Collect Docker and SSH diagnostics
-              if: failure()
-              run: |
-                  mkdir -p artifacts/docker artifacts/test
-
-                  echo "🪣 Collecting Docker logs..."
-                  docker compose -f test/docker-compose.yml logs --no-color > artifacts/docker/logs.txt 2>&1 || true
-                  docker ps -a > artifacts/docker/ps.txt 2>&1 || true
-                  docker network ls > artifacts/docker/networks.txt 2>&1 || true
-                  docker compose -f test/docker-compose.yml config > artifacts/docker/compose-config.txt 2>&1 || true
-
-                  echo "🪣 Inspecting containers..."
-                  for cid in $(docker ps -q); do
-                    cname=$(docker inspect -f '{{.Name}}' "$cid" | sed 's#^/##')
-                    docker inspect "$cid" > "artifacts/docker/inspect_${cname}.json" 2>&1 || true
-                  done
-
-                  echo "🪣 Inspecting networks..."
-                  for net in $(docker network ls -q); do
-                    docker network inspect "$net" > "artifacts/docker/network_${net}.json" 2>&1 || true
-                  done
-
-                  echo "🪣 Collecting SSH test dirs..."
-                  cp -r test/ca test/clientkeys test/hostkeys test/home test/target1 test/target2 artifacts/test/ || true
-
-            - name: 🧩 Show last 30 lines of test output
-              if: always()
-              run: |
-                  echo "--- Last 30 lines of go test output ---"
-                  tail -n 30 artifacts/go_test_output.txt || true
-                  echo "--- Docker containers ---"
-                  docker ps -a || true
-
-            - name: 📦 Compress artifacts
-              if: failure()
-              run: |
-                  tar -czf artifacts.tar.gz artifacts
-
-            - name: ⬆️ Upload artifacts (compressed)
-              if: failure()
-              uses: actions/upload-artifact@v4
-              with:
-                  name: test-artifacts
-                  path: artifacts.tar.gz
-                  retention-days: 7
-
-            - name: 🧹 Tear down environment
-              if: always()
-              run: |
-                  docker compose -f test/docker-compose.yml down --remove-orphans || true
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: make test-setup
+      - run: go test -v ./...
+      - run: make build
