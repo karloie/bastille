@@ -266,7 +266,6 @@ func (m *mockServerContext) startBastilleWithMode(t *testing.T, mode string, opt
 	}
 	m.writeAuthorizedKeys(t)
 
-	// If not cert-only, reuse the generic startup
 	if cfg.AUTH_MODE != "certs" {
 		server, addr, err := startBastilleServer(m.ctx, t, cfg)
 		if err != nil {
@@ -277,7 +276,6 @@ func (m *mockServerContext) startBastilleWithMode(t *testing.T, mode string, opt
 		return server
 	}
 
-	// Cert-only: enforce certificate presence during auth
 	srv := newSSHServerConfig(&cfg, true)
 
 	ln, err := net.Listen("tcp", cfg.ADDRESS)

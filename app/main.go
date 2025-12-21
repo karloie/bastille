@@ -220,10 +220,8 @@ func (s *Server) handleConn(ctx context.Context, c net.Conn, srv *ssh.ServerConf
 				continue
 			}
 
-			// Parse destination from direct-tcpip extra data
 			dst := dstFromExtra(ch.ExtraData())
 
-			// Strict default-deny: PermitOpen must explicitly allow dst
 			if !s.allowedTunnel(sshConn, dst) {
 				logEvent("warn", cid, sshConn, dst, "tunnel denied", nil, nil)
 				_ = ch.Reject(ssh.ConnectionFailed, "denied")
