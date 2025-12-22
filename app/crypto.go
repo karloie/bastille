@@ -46,11 +46,73 @@ func keysEqual(a, b ssh.PublicKey) bool {
 	return subtle.ConstantTimeCompare(x, y) == 1
 }
 
-func loadHostkeys(cfg *Config, base string, hostKeys []string, srvCfg *ssh.ServerConfig) int {
+func loadHostkeys(cfg *Config, hostKeys []string, srvCfg *ssh.ServerConfig) int {
+	// HOST_KEYS accepts absolute files, directories, or globs.
+	// - Files are read as private keys.
+	// - Directories are scanned for ssh_host_*_key (excluding *.pub); also considered for generation.
+	// - Globs are expanded.
+	var candidates []string
+	var genTargets []string
+
+	for _, raw := range hostKeys {
+		hk := strings.TrimSpace(raw)
+		if hk == "" {
+			continue
+		}
+		// Glob patterns
+		if strings.ContainsAny(hk, "*?[") {
+			if matches, err := filepath.Glob(hk); err == nil {
+				candidates = append(candidates, matches...)
+			} else {
+				logEvent("warn", "", nil, hk, "glob error", nil, err)
+			}
+			continue
+		}
+
+		fi, err := os.Stat(hk)
+		if err == nil && fi.IsDir() {
+			// Scan directory for typical private host keys
+			entries, derr := os.ReadDir(hk)
+			if derr != nil {
+				logEvent("warn", "", nil, hk, "host dir read failed", nil, derr)
+			} else {
+				for _, e := range entries {
+					if e.IsDir() {
+						continue
+					}
+					name := e.Name()
+					if strings.HasPrefix(name, "ssh_host_") && strings.HasSuffix(name, "_key") && !strings.HasSuffix(name, ".pub") {
+						candidates = append(candidates, filepath.Join(hk, name))
+					}
+				}
+			}
+			// Consider this directory for ed25519 generation
+			genTargets = append(genTargets, filepath.Join(hk, "ssh_host_ed25519_key"))
+			continue
+		}
+
+		// Treat as file path (may or may not exist yet)
+		candidates = append(candidates, hk)
+		if strings.Contains(strings.ToLower(hk), "ed25519") {
+			genTargets = append(genTargets, hk)
+		}
+	}
+
+	// De-duplicate candidates while preserving order
+	seen := make(map[string]struct{}, len(candidates))
+	uniq := make([]string, 0, len(candidates))
+	for _, p := range candidates {
+		if _, ok := seen[p]; ok {
+			continue
+		}
+		seen[p] = struct{}{}
+		uniq = append(uniq, p)
+	}
+
 	loaded := 0
-	for _, hk := range hostKeys {
-		path := filepath.Join(base, hk)
-		nameLower := strings.ToLower(hk)
+	for _, path := range uniq {
+		nameLower := strings.ToLower(filepath.Base(path))
+		// Prefer generating/ensuring ed25519 when referenced
 		if strings.Contains(nameLower, "ed25519") {
 			if s, ok := ensureEd25519HostKey(path); ok {
 				srvCfg.AddHostKey(s)
@@ -73,6 +135,19 @@ func loadHostkeys(cfg *Config, base string, hostKeys []string, srvCfg *ssh.Serve
 		loaded++
 		logEvent("info", "", nil, path, "host key loaded", nil, nil)
 	}
+
+	// If nothing loaded, attempt to generate an ed25519 key at the first writable generation target.
+	if loaded == 0 {
+		for _, tgt := range genTargets {
+			if s, ok := ensureEd25519HostKey(tgt); ok {
+				srvCfg.AddHostKey(s)
+				loaded++
+				logEvent("info", "", nil, tgt, "host key generated (fallback)", nil, nil)
+				break
+			}
+		}
+	}
+
 	return loaded
 }
 
@@ -89,7 +164,14 @@ func ensureEd25519HostKey(path string) (ssh.Signer, bool) {
 	}
 	if err := os.MkdirAll(filepath.Dir(path), permDirDefault); err != nil {
 		logEvent("warn", "", nil, path, "mkdir failed", nil, err)
-		return nil, false
+		// Fallback: use a temp directory to place the host key
+		if tmpDir, terr := os.MkdirTemp("", "bastille-hostkeys-*"); terr == nil {
+			path = filepath.Join(tmpDir, filepath.Base(path))
+			logEvent("info", "", nil, path, "using temp path for host key", nil, nil)
+		} else {
+			logEvent("warn", "", nil, path, "temp dir create failed", nil, terr)
+			return nil, false
+		}
 	}
 	pkcs8, err := x509.MarshalPKCS8PrivateKey(priv)
 	if err != nil {
@@ -99,7 +181,18 @@ func ensureEd25519HostKey(path string) (ssh.Signer, bool) {
 	pemBlock := &pem.Block{Type: "PRIVATE KEY", Bytes: pkcs8}
 	if err := os.WriteFile(path, pem.EncodeToMemory(pemBlock), permPrivateKey); err != nil {
 		logEvent("warn", "", nil, path, "write private key failed", nil, err)
-		return nil, false
+		// Fallback: try writing to a temp directory instead
+		if tmpDir, terr := os.MkdirTemp("", "bastille-hostkeys-*"); terr == nil {
+			path = filepath.Join(tmpDir, filepath.Base(path))
+			if werr := os.WriteFile(path, pem.EncodeToMemory(pemBlock), permPrivateKey); werr != nil {
+				logEvent("warn", "", nil, path, "write private key failed (temp)", nil, werr)
+				return nil, false
+			}
+			logEvent("info", "", nil, path, "host key written to temp path", nil, nil)
+		} else {
+			logEvent("warn", "", nil, path, "temp dir create failed", nil, terr)
+			return nil, false
+		}
 	}
 	sshPub, err := ssh.NewPublicKey(pub)
 	if err == nil {
@@ -119,22 +212,78 @@ func ensureEd25519HostKey(path string) (ssh.Signer, bool) {
 	return s, true
 }
 
-func loadCaKeys(cfg *Config, base string, paths []string) []ssh.PublicKey {
-	out := make([]ssh.PublicKey, 0, len(paths))
-	for _, p := range paths {
-		path := filepath.Join(base, p)
+func loadCaKeys(cfg *Config, paths []string) []ssh.PublicKey {
+	// CERT_KEYS is a comma-separated list of absolute files, directories, or globs.
+	// Directories are scanned for *.pub; globs are expanded; files are read as-is.
+	var files []string
+
+	for _, raw := range paths {
+		p := strings.TrimSpace(raw)
+		if p == "" {
+			continue
+		}
+		// Glob patterns
+		if strings.ContainsAny(p, "*?[") {
+			if matches, err := filepath.Glob(p); err == nil {
+				files = append(files, matches...)
+			} else {
+				logEvent("warn", "", nil, p, "glob error", nil, err)
+			}
+			continue
+		}
+		// File or directory
+		fi, err := os.Stat(p)
+		if err != nil {
+			logEvent("warn", "", nil, p, "read error", nil, err)
+			continue
+		}
+		if fi.IsDir() {
+			entries, err := os.ReadDir(p)
+			if err != nil {
+				logEvent("warn", "", nil, p, "dir read failed", nil, err)
+				continue
+			}
+			for _, e := range entries {
+				if !e.IsDir() && strings.HasSuffix(e.Name(), ".pub") {
+					files = append(files, filepath.Join(p, e.Name()))
+				}
+			}
+			continue
+		}
+		// Regular file
+		files = append(files, p)
+	}
+
+	// De-duplicate while preserving order
+	seen := make(map[string]struct{}, len(files))
+	uniq := make([]string, 0, len(files))
+	for _, f := range files {
+		if _, ok := seen[f]; ok {
+			continue
+		}
+		seen[f] = struct{}{}
+		uniq = append(uniq, f)
+	}
+
+	// Load one or more authorized keys per file
+	out := make([]ssh.PublicKey, 0, len(uniq))
+	for _, path := range uniq {
 		b, err := os.ReadFile(path)
 		if err != nil {
 			logEvent("warn", "", nil, path, "read error", nil, err)
 			continue
 		}
-		pub, _, _, _, err := ssh.ParseAuthorizedKey(b)
-		if err != nil {
-			logEvent("warn", "", nil, path, "parse error", nil, err)
-			continue
+		rest := b
+		for len(rest) > 0 {
+			pub, _, _, r, err := ssh.ParseAuthorizedKey(rest)
+			if err != nil {
+				logEvent("warn", "", nil, path, "parse error", nil, err)
+				break
+			}
+			out = append(out, pub)
+			logEvent("info", "", nil, path, "ca key loaded", nil, nil)
+			rest = r
 		}
-		out = append(out, pub)
-		logEvent("info", "", nil, path, "ca key loaded", nil, nil)
 	}
 	return out
 }

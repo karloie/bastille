@@ -20,14 +20,8 @@ func TestLoadConfigDefaults(t *testing.T) {
 	if cfg.LogLevel != "INFO" {
 		t.Errorf("expected default LogLevel=INFO, got %s", cfg.LogLevel)
 	}
-	if cfg.AUTH_BASE != "/home" {
-		t.Errorf("expected default AUTH_BASE=/home, got %s", cfg.AUTH_BASE)
-	}
-	if cfg.CERT_BASE != "/ca" {
-		t.Errorf("expected default CERT_BASE=/ca, got %s", cfg.CERT_BASE)
-	}
-	if cfg.HOST_BASE != "/hostkeys" {
-		t.Errorf("expected default HOST_BASE=/hostkeys, got %s", cfg.HOST_BASE)
+	if len(cfg.CERT_KEYS) != 1 || cfg.CERT_KEYS[0] != "/ca" {
+		t.Errorf("expected default CERT_KEYS=[/ca], got %v", cfg.CERT_KEYS)
 	}
 	if len(cfg.Ciphers) == 0 {
 		t.Errorf("expected non-empty Ciphers list")

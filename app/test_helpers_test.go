@@ -25,6 +25,37 @@ const (
 	sshDialTimeout     = 5 * time.Second
 )
 
+var (
+	portAllocMu    sync.Mutex
+	nextBastille   = 22222
+	nextTarget     = 33333
+	nextClientPort = 11111
+)
+
+func nextBastillePort() string {
+	portAllocMu.Lock()
+	p := nextBastille
+	nextBastille++
+	portAllocMu.Unlock()
+	return fmt.Sprintf("127.0.0.1:%d", p)
+}
+
+func nextTargetPort() string {
+	portAllocMu.Lock()
+	p := nextTarget
+	nextTarget++
+	portAllocMu.Unlock()
+	return fmt.Sprintf("127.0.0.1:%d", p)
+}
+
+func nextClientLocalAddr() *net.TCPAddr {
+	portAllocMu.Lock()
+	p := nextClientPort
+	nextClientPort++
+	portAllocMu.Unlock()
+	return &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: p}
+}
+
 type tlogHandler struct {
 	t     *testing.T
 	level slog.Level
@@ -243,18 +274,15 @@ func (m *mockServerContext) startBastille(t *testing.T, opts ...func(*Config)) *
 
 func (m *mockServerContext) startBastilleWithMode(t *testing.T, mode string, opts ...func(*Config)) *Server {
 	cfg := Config{
-		ADDRESS:      "127.0.0.1:0",
+		ADDRESS:      nextBastillePort(),
 		LogLevel:     "ERROR",
 		Testing:      true,
 		RateLimit:    100,
 		MaxTunnels:   10,
 		DialTO:       5 * time.Second,
-		HOST_BASE:    filepath.Join(m.tmpDir, "hostkeys"),
-		HOST_KEYS:    []string{"ssh_host_ed25519_key"},
-		CERT_BASE:    filepath.Join(m.tmpDir, "ca"),
-		CERT_KEYS:    []string{"ca.pub"},
-		AUTH_BASE:    filepath.Join(m.tmpDir, "home"),
-		AUTH_KEYS:    []string{"{user}/authorized_keys"},
+		HOST_KEYS:    []string{filepath.Join(m.tmpDir, "hostkeys")},
+		CERT_KEYS:    []string{filepath.Join(m.tmpDir, "ca")},
+		AUTH_KEYS:    []string{filepath.Join(m.tmpDir, "home/{user}/authorized_keys")},
 		AUTH_MODE:    mode,
 		Ciphers:      []string{"chacha20-poly1305@openssh.com"},
 		KeyExchanges: []string{"curve25519-sha256"},
@@ -272,7 +300,7 @@ func (m *mockServerContext) startBastilleWithMode(t *testing.T, mode string, opt
 			t.Fatalf("failed to start bastille: %v", err)
 		}
 		m.bastilleAddr = addr
-		slog.Info("bastille listening (test)", "addr", addr, "mode", cfg.AUTH_MODE)
+		slog.Info("bastille listening (test)", "src", "bastille", "addr", addr, "mode", cfg.AUTH_MODE)
 		return server
 	}
 
@@ -295,7 +323,7 @@ func (m *mockServerContext) startBastilleWithMode(t *testing.T, mode string, opt
 		t.Fatalf("bastille not ready: %v", err)
 	}
 	m.bastilleAddr = actualAddr
-	slog.Info("bastille (cert-only) listening (test)", "addr", actualAddr)
+	slog.Info("bastille (cert-only) listening (test)", "src", "bastille", "addr", actualAddr)
 	return server
 }
 
@@ -357,13 +385,14 @@ func startMockSSHServer(ctx context.Context, hostKey ssh.Signer) (string, error)
 	}
 	config.AddHostKey(hostKey)
 
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	addr := nextTargetPort()
+	listener, err := net.Listen("tcp", addr)
 	if err != nil {
 		return "", err
 	}
 
 	actualAddr := listener.Addr().String()
-	slog.Info("mock target listening", "addr", actualAddr)
+	slog.Info("sshd listening", "src", "mock", "addr", actualAddr)
 
 	var wg sync.WaitGroup
 	done := make(chan struct{})
@@ -397,6 +426,9 @@ func startMockSSHServer(ctx context.Context, hostKey ssh.Signer) (string, error)
 
 func handleMockSSH(conn net.Conn, config *ssh.ServerConfig) {
 	defer conn.Close()
+	var id [8]byte
+	_, _ = rand.Read(id[:])
+	slog.Info("sshd connected", "src", "mock", "id", hex.EncodeToString(id[:]), "remote", conn.RemoteAddr().String())
 
 	sconn, chans, reqs, err := ssh.NewServerConn(conn, config)
 	if err != nil {
@@ -504,10 +536,21 @@ func sshConnect(user, proxyUser, proxyAddr, targetAddr string, key ssh.Signer) (
 		Timeout:         5 * time.Second,
 	}
 
-	proxyConn, err := ssh.Dial("tcp", proxyAddr, proxyConfig)
+	// Bind client local port in 11111+ range when dialing bastille
+	dlr := &net.Dialer{
+		Timeout:   5 * time.Second,
+		LocalAddr: nextClientLocalAddr(),
+	}
+	rawConn, err := dlr.Dial("tcp", proxyAddr)
 	if err != nil {
 		return nil, fmt.Errorf("proxy dial failed: %w", err)
 	}
+	cc, chans, reqs, err := ssh.NewClientConn(rawConn, proxyAddr, proxyConfig)
+	if err != nil {
+		rawConn.Close()
+		return nil, fmt.Errorf("proxy dial failed: %w", err)
+	}
+	proxyConn := ssh.NewClient(cc, chans, reqs)
 
 	targetHost, targetPort, err := net.SplitHostPort(targetAddr)
 	if err != nil {

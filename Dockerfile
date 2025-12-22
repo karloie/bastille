@@ -1,60 +1,83 @@
+# Builder: build a static bastille binary
 FROM golang:1.24-alpine AS builder
 
 ARG VERSION=dev
 ARG GIT_COMMIT=unknown
 ARG BUILD_TIME
 
-WORKDIR /app
+# Networking/proxy config for restricted environments
+ARG GOPROXY=https://proxy.golang.org,direct
+ARG HTTP_PROXY
+ARG HTTPS_PROXY
+ARG NO_PROXY
+# Optional DNS override inside builder (space-separated for multiple)
+ARG BUILDER_DNS
 
-COPY go.* ./
-RUN go mod download
+# Export to environment so Go and tools pick them up
+ENV GOPROXY=$GOPROXY
+ENV HTTP_PROXY=$HTTP_PROXY
+ENV HTTPS_PROXY=$HTTPS_PROXY
+ENV NO_PROXY=$NO_PROXY
+ENV http_proxy=$HTTP_PROXY
+ENV https_proxy=$HTTPS_PROXY
+ENV no_proxy=$NO_PROXY
 
-COPY app/ ./app/
-RUN CGO_ENABLED=0 GOOS=linux go build -trimpath \
-    -ldflags "-s -w -X main.Version=${VERSION} -X main.GitCommit=${GIT_COMMIT} -X main.BuildTime=${BUILD_TIME}" \
-    -o bastille ./app
+# If BUILDER_DNS is set, override /etc/resolv.conf for reliable name resolution during build
+RUN if [ -n "$BUILDER_DNS" ]; then \
+    { for d in $BUILDER_DNS; do echo "nameserver $d"; done; } > /etc/resolv.conf; \
+    fi
+
+WORKDIR /src
+COPY go.mod go.sum ./
+COPY app app
+RUN mkdir -p /out && CGO_ENABLED=0 GOOS=linux \
+    go build -trimpath -ldflags "-s -w \
+    -X main.Version=${VERSION} \
+    -X main.GitCommit=${GIT_COMMIT} \
+    -X main.BuildTime=${BUILD_TIME}" \
+    -o /out/bastille ./app
+
 
 FROM alpine:3.23
-
-LABEL maintainer="Karl-Bjørnar Øie <karloie@gmail.com>"
-
-RUN addgroup -g 1000 bastille && \
-    adduser -D -u 1000 -G bastille bastille
-
-COPY --from=builder /app/bastille /usr/local/bin/bastille
-
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+COPY --from=builder /out/bastille /usr/local/bin/bastille
+RUN addgroup -g 10001 bastille && adduser -D -u 10001 -G bastille bastille && mkdir -p /hostkeys /home /ca && chown -R bastille:bastille /hostkeys /home /ca
 USER bastille
 
-ENV LISTEN_PORT=22222 \
-    LOGLEVEL=INFO \
-    TESTING=no \
-    STRICTMODES=no \
-    AGENT_FORWARDING=no \
-    GATEWAY_PORTS=no \
-    PERMIT_TUNNEL=no \
-    TCP_FORWARDING=yes \
-    X11_FORWARDING=no \
-    CASIGNATUREALGORITHMS="sk-ssh-ed25519@openssh.com,ssh-ed25519,rsa-sha2-512,rsa-sha2-256" \
-    CIPHERS="chacha20-poly1305@openssh.com,aes256-gcm@openssh.com,aes256-ctr,aes192-ctr,aes128-gcm@openssh.com,aes128-ctr" \
-    HOSTBASEDACCEPTEDALGORITHMS="sk-ssh-ed25519-cert-v01@openssh.com,ssh-ed25519-cert-v01@openssh.com,rsa-sha2-512-cert-v01@openssh.com,rsa-sha2-256-cert-v01@openssh.com,sk-ssh-ed25519@openssh.com,ssh-ed25519,rsa-sha2-512,rsa-sha2-256" \
-    HOSTKEYALGORITHMS="sk-ssh-ed25519-cert-v01@openssh.com,ssh-ed25519-cert-v01@openssh.com,rsa-sha2-512-cert-v01@openssh.com,rsa-sha2-256-cert-v01@openssh.com,sk-ssh-ed25519@openssh.com,ssh-ed25519,rsa-sha2-512,rsa-sha2-256" \
-    KEXALGORITHMS="sntrup761x25519-sha512@openssh.com,curve25519-sha256,curve25519-sha256@libssh.org,diffie-hellman-group18-sha512,diffie-hellman-group-exchange-sha256,diffie-hellman-group16-sha512" \
-    MACS="hmac-sha2-512-etm@openssh.com,hmac-sha2-256-etm@openssh.com,umac-128-etm@openssh.com" \
-    PUBKEYACCEPTEDALGORITHMS="sk-ssh-ed25519-cert-v01@openssh.com,ssh-ed25519-cert-v01@openssh.com,rsa-sha2-512-cert-v01@openssh.com,rsa-sha2-256-cert-v01@openssh.com,sk-ssh-ed25519@openssh.com,ssh-ed25519,rsa-sha2-512,rsa-sha2-256" \
-    REQUIREDRSASIZE=3072 \
-    SMTP_HOST=smtp.gmail.com \
-    SMTP_MAIL="" \
-    SMTP_PASS_FILE=/run/secrets/smtp_pass \
-    SMTP_PORT=587 \
-    SMTP_USER="" \
-    AUTH_BASE=/home \
-    AUTH_KEYS="{user},{user}/.ssh/authorized_keys" \
-    CERT_BASE=/ca \
-    CERT_KEYS="ca1.pub,ca2.pub" \
-    HOST_BASE=/hostkeys \
-    HOST_KEYS="ssh_host_ed25519_key,ssh_host_rsa_key" \
-    DEBUG=false
+ENV LISTEN_PORT="22222"
+ENV LOGLEVEL="INFO"
+ENV TESTING="no"
+ENV STRICTMODES="no"
+
+# OpenSSH-style controls (kept for compatibility; ignored by Go server)
+ENV AGENT_FORWARDING="no"
+ENV GATEWAY_PORTS="no"
+ENV PERMIT_TUNNEL="no"
+ENV TCP_FORWARDING="yes"
+ENV X11_FORWARDING="no"
+
+# Crypto hardening knobs (kept; Go server has its own, safe to pass through)
+ENV CASIGNATUREALGORITHMS="sk-ssh-ed25519@openssh.com,ssh-ed25519,rsa-sha2-512,rsa-sha2-256"
+ENV CIPHERS="chacha20-poly1305@openssh.com,aes256-gcm@openssh.com,aes256-ctr,aes192-ctr,aes128-gcm@openssh.com,aes128-ctr"
+ENV HOSTBASEDACCEPTEDALGORITHMS="sk-ssh-ed25519-cert-v01@openssh.com,ssh-ed25519-cert-v01@openssh.com,rsa-sha2-512-cert-v01@openssh.com,rsa-sha2-256-cert-v01@openssh.com,sk-ssh-ed25519@openssh.com,ssh-ed25519,rsa-sha2-512,rsa-sha2-256"
+ENV HOSTKEYALGORITHMS="sk-ssh-ed25519-cert-v01@openssh.com,ssh-ed25519-cert-v01@openssh.com,rsa-sha2-512-cert-v01@openssh.com,rsa-sha2-256-cert-v01@openssh.com,sk-ssh-ed25519@openssh.com,ssh-ed25519,rsa-sha2-512,rsa-sha2-256"
+ENV KEXALGORITHMS="sntrup761x25519-sha512@openssh.com,curve25519-sha256,curve25519-sha256@libssh.org,diffie-hellman-group18-sha512,diffie-hellman-group-exchange-sha256,diffie-hellman-group16-sha512"
+ENV MACS="hmac-sha2-512-etm@openssh.com,hmac-sha2-256-etm@openssh.com,umac-128-etm@openssh.com"
+ENV PUBKEYACCEPTEDALGORITHMS="sk-ssh-ed25519-cert-v01@openssh.com,ssh-ed25519-cert-v01@openssh.com,rsa-sha2-512-cert-v01@openssh.com,rsa-sha2-256-cert-v01@openssh.com,sk-ssh-ed25519@openssh.com,ssh-ed25519,rsa-sha2-512,rsa-sha2-256"
+ENV REQUIREDRSASIZE="3072"
+ENV MODULI_MIN=""
+
+# SMTP knobs (SMTP disabled unless SMTP_MAIL is set)
+ENV SMTP_HOST=""
+ENV SMTP_MAIL=""
+ENV SMTP_PORT="587"
+ENV SMTP_USER=""
+ENV SMTP_PASS_FILE="/run/secrets/smtp_pass"
+
+# Go-server specific locations (mount volumes at runtime as needed)
+ENV AUTH_KEYS="/home/{user},/home/{user}/.ssh/authorized_keys"
+ENV CERT_KEYS="/ca"
+ENV HOST_KEYS="/hostkeys"
 
 EXPOSE 22222/tcp
-
-ENTRYPOINT ["bastille"]
+ENTRYPOINT ["/usr/local/bin/bastille"]

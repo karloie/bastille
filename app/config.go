@@ -23,17 +23,11 @@ const (
 type Config struct {
 	ADDRESS string
 
-	AUTH_BASE string
-
 	AUTH_KEYS []string
 
 	AUTH_MODE string
 
-	CERT_BASE string
-
 	CERT_KEYS []string
-
-	HOST_BASE string
 
 	HOST_KEYS []string
 
@@ -79,13 +73,10 @@ func LoadConfig() Config {
 
 	cfg := Config{
 		ADDRESS:      addr,
-		AUTH_BASE:    envStr("AUTH_BASE", "/home"),
-		AUTH_KEYS:    splitList(envStr("AUTH_KEYS", "{user},.ssh/authorized_keys")),
 		AUTH_MODE:    envStr("AUTHMODE", "optional"),
-		CERT_BASE:    envStr("CERT_BASE", "/ca"),
-		CERT_KEYS:    splitList(envStr("CERT_KEYS", "ca.pub")),
-		HOST_BASE:    envStr("HOST_BASE", "/hostkeys"),
-		HOST_KEYS:    splitList(envStr("HOST_KEYS", "ssh_host_ed25519_key,ssh_host_rsa_key")),
+		AUTH_KEYS:    splitList(envStr("AUTH_KEYS", "test/home/{user}/authorized_keys")),
+		CERT_KEYS:    splitList(envStr("CERT_KEYS", "/ca")),
+		HOST_KEYS:    splitList(envStr("HOST_KEYS", "/hostkeys")),
 		MaxTunnels:   envInt("MAX_TUNNELS", 5),
 		RateLimit:    envInt("RATE", defaultRateLimit),
 		DialTO:       5 * time.Second,

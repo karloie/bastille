@@ -105,17 +105,17 @@ func main() {
 	}
 	handler := slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level})
 	slog.SetDefault(slog.New(handler))
-	slog.Info("Bastille started", "version", Version, "commit", GitCommit, "buildTime", BuildTime)
+	slog.Info("Bastille started", "src", "bastille", "version", Version, "commit", GitCommit, "buildTime", BuildTime)
 	srv := &ssh.ServerConfig{Config: ssh.Config{
 		Ciphers:      cfg.Ciphers,
 		KeyExchanges: cfg.KeyExchanges,
 		MACs:         cfg.MACs,
 	}}
-	if n := loadHostkeys(&cfg, cfg.HOST_BASE, cfg.HOST_KEYS, srv); n == 0 {
+	if n := loadHostkeys(&cfg, cfg.HOST_KEYS, srv); n == 0 {
 		slog.Error("no host keys loaded; refusing to start")
 		os.Exit(1)
 	}
-	caPub := loadCaKeys(&cfg, cfg.CERT_BASE, cfg.CERT_KEYS)
+	caPub := loadCaKeys(&cfg, cfg.CERT_KEYS)
 	cChecker := certChecker(&cfg, caPub, cfg.AUTH_KEYS)
 	srv.PublicKeyCallback = func(meta ssh.ConnMetadata, key ssh.PublicKey) (*ssh.Permissions, error) {
 		if cfg.AUTH_MODE == "certs" {
@@ -144,10 +144,20 @@ func main() {
 	}
 	ln, err := net.Listen("tcp", cfg.ADDRESS)
 	if err != nil {
-		slog.Error("listen failed", "error", err)
+		slog.Error("listen failed", "src", "bastille", "error", err)
 		os.Exit(1)
 	}
-	slog.Info("Bastille listening", "config", cfg.String())
+	cfgSummary := map[string]any{
+		"addr":        cfg.ADDRESS,
+		"authMode":    cfg.AUTH_MODE,
+		"maxTunnels":  cfg.MaxTunnels,
+		"rateLimit":   cfg.RateLimit,
+		"strictModes": cfg.StrictModes,
+		"ciphers":     len(cfg.Ciphers),
+		"kex":         len(cfg.KeyExchanges),
+		"macs":        len(cfg.MACs),
+	}
+	slog.Info("Bastille listening", "src", "bastille", "config", fmt.Sprintf("%v", cfgSummary))
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	server := NewServer(cfg)
@@ -308,7 +318,7 @@ func (server *Server) proxy(ctx context.Context, cid string, ch ssh.NewChannel, 
 
 func loadCertPermit(cfg *Config, user string) string {
 	for _, tmpl := range cfg.AUTH_KEYS {
-		path := filepath.Join(cfg.AUTH_BASE, strings.ReplaceAll(tmpl, "{user}", user))
+		path := strings.ReplaceAll(tmpl, "{user}", user)
 		if cfg.StrictModes && !strictPathOK(cfg, path) {
 			continue
 		}
@@ -380,14 +390,11 @@ func strictPathOK(cfg *Config, path string) bool {
 	if di.Mode().Perm()&permGroupOther != 0 {
 		return false
 	}
-	if rel, err := filepath.Rel(cfg.AUTH_BASE, path); err != nil || strings.HasPrefix(rel, "..") {
-		return false
-	}
 	return true
 }
 
 func logEvent(lvl string, cid string, meta ssh.ConnMetadata, dst, msg string, value any, err error) {
-	attrs := []any{}
+	attrs := []any{"src", "bastille"}
 	if cid != "" {
 		attrs = append(attrs, "i", cid)
 	}

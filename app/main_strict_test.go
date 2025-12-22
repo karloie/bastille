@@ -14,7 +14,6 @@ func TestStrictPathOK(t *testing.T) {
 	}
 
 	cfg := &Config{
-		AUTH_BASE: authBase,
 	}
 
 	t.Run("valid file passes", func(t *testing.T) {

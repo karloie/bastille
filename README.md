@@ -96,7 +96,7 @@ The jump server can be configured further with these environment variables.
 - `RATE`: 10 connection attempts per IP per minute (default).
 - LOGLEVEL: INFO|VERBOSE|DEBUG (default INFO)
 - TESTING: yes|no (default no)
-- `STRICTMODES`: enforces safe permissions on `AUTH_BASE` files (default `no`).
+- `STRICTMODES`: enforces safe permissions on `AUTH_KEYS` files (default `no`).
 - MODULI_MIN: optional (e.g., 2048)
 
 #### SSHD parameters ([sshd_config](https://www.ssh.com/academy/ssh/sshd_config))

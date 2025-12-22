@@ -22,8 +22,47 @@ func certChecker(cfg *Config, caPub []ssh.PublicKey, authFiles []string) *ssh.Ce
 		},
 		UserKeyFallback: func(conn ssh.ConnMetadata, pubKey ssh.PublicKey) (*ssh.Permissions, error) {
 			user := rxUserSanitize.ReplaceAllString(conn.User(), "")
+
+			// Expand AUTH_KEYS entries into concrete file paths:
+			// - Replace {user}
+			// - Expand globs
+			// - If directory, scan all regular files in it
+			var candidates []string
 			for _, tmpl := range authFiles {
-				path := filepath.Join(cfg.AUTH_BASE, strings.ReplaceAll(tmpl, "{user}", user))
+				p := strings.ReplaceAll(tmpl, "{user}", user)
+				p = strings.TrimSpace(p)
+				if p == "" {
+					continue
+				}
+				// Glob patterns
+				if strings.ContainsAny(p, "*?[") {
+					if matches, err := filepath.Glob(p); err == nil {
+						candidates = append(candidates, matches...)
+					}
+					continue
+				}
+				// Directory
+				if fi, err := os.Stat(p); err == nil && fi.IsDir() {
+					if entries, derr := os.ReadDir(p); derr == nil {
+						for _, e := range entries {
+							if !e.IsDir() {
+								candidates = append(candidates, filepath.Join(p, e.Name()))
+							}
+						}
+					}
+					continue
+				}
+				// File (or non-existent path; evalPermissions will fail safely)
+				candidates = append(candidates, p)
+			}
+
+			// De-duplicate while preserving order, then evaluate
+			seen := make(map[string]struct{}, len(candidates))
+			for _, path := range candidates {
+				if _, ok := seen[path]; ok {
+					continue
+				}
+				seen[path] = struct{}{}
 				if perm, ok := evalPermissions(cfg, path, pubKey); ok {
 					return perm, nil
 				}

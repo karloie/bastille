@@ -28,8 +28,7 @@ func TestLoadCertPermit(t *testing.T) {
 	}
 
 	cfg := Config{
-		AUTH_BASE: filepath.Join(tmpDir, "home"),
-		AUTH_KEYS: []string{"{user}/authorized_keys"},
+		AUTH_KEYS: []string{filepath.Join(tmpDir, "home", "{user}", "authorized_keys")},
 	}
 
 	opts := loadCertPermit(&cfg, "lilo")
