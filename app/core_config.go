@@ -34,6 +34,8 @@ type Config struct {
 	StrictMode  bool
 	Testing     bool
 
+	MetricsAddress string
+
 	SmtpHost   string
 	SmtpMail   string
 	SmtpSecret string
@@ -61,6 +63,8 @@ const (
 	EnvMaxSessions = "MaxSessions"
 	EnvMaxStartups = "PerSourceMaxStartups"
 	EnvStrictMode  = "StrictModes"
+
+	EnvMetricsAddress = "MetricsAddress"
 
 	EnvSmtpHost   = "SmtpHost"
 	EnvSmtpMail   = "SmtpMail"
@@ -94,6 +98,8 @@ func LoadConfig() Config {
 		MaxSessions: envInt(EnvMaxSessions, 5),
 		MaxStartups: envInt(EnvMaxStartups, 10),
 		StrictMode:  envBool(EnvStrictMode, false),
+
+		MetricsAddress: strings.TrimSpace(envStr(EnvMetricsAddress, "")),
 		Testing:     envBool(EnvTesting, false),
 
 		SmtpHost:   envStr(EnvSmtpHost, ""),

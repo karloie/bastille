@@ -75,6 +75,7 @@ services:
       - ALL
     ports:
       - 22222:22222/tcp
+      - 9090:9090/tcp
     read_only: true
     tmpfs:
       - /run
@@ -89,6 +90,7 @@ services:
       PerSourceMaxStartups: 10
       LogLevel: INFO
       StrictModes: no
+      MetricsAddress: "0.0.0.0:9090"
       AuthorizedKeysFile: "/home/{user}/.ssh/authorized_keys"
       TrustedUserCAKeys: "/home/{user}/.ssh/ca.pub,/ca"
       HostKey: "/hostkeys"
@@ -116,6 +118,7 @@ Environment variables:
 - `PerSourceMaxStartups` (default 10; per-source rate limit)
 - `LogLevel` (INFO, VERBOSE, DEBUG, WARN, ERROR)
 - `StrictModes` (default no) - enforces safe permissions on key file paths
+- `MetricsAddress` (default empty; disabled) - Prometheus metrics endpoint (e.g., `0.0.0.0:9090`)
 
 **Key paths** (OpenSSH-style directive names; comma-separated; `{user}` placeholder and globs)
 - `AuthorizedKeysFile` - authorized_keys files (e.g., `/home/{user}/.ssh/authorized_keys`)
@@ -132,6 +135,12 @@ Environment variables:
 - `SMTP_HOST`, `SMTP_MAIL`, `SMTP_USER`
 - `SMTP_PORT` (default 587)
 - `SMTP_PASS_FILE` (default /run/secrets/smtp_pass)
+
+**Observability**
+- `MetricsAddress` - Prometheus metrics endpoint (e.g., `127.0.0.1:9090`)
+  - Exposes `/metrics` endpoint with connection stats, tunnel counts, auth failures, rate limits, bytes transferred
+  - Exposes `/health` endpoint returning `ok`
+  - Disabled by default (empty string)
 
 **Structure:**
 ```

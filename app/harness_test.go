@@ -427,7 +427,8 @@ func (h *testHarness) runWithMode(t *testing.T, mode string, opts ...func(*Confi
 		ln.Close()
 	}()
 
-	server := NewServer(cfg)
+	metrics := NewMetrics()
+	server := NewServer(cfg, metrics)
 	go server.serve(h.ctx, srv, ln)
 
 	actualAddr := ln.Addr().String()
@@ -465,7 +466,8 @@ func (h *testHarness) RunScenarioWithCertOnly(t *testing.T, opts ...func(*Config
 		ln.Close()
 	}()
 
-	server := NewServer(cfg)
+	metrics := NewMetrics()
+	server := NewServer(cfg, metrics)
 	go server.serve(h.ctx, srv, ln)
 
 	actualAddr := ln.Addr().String()
@@ -524,7 +526,8 @@ func (h *testHarness) writeAuthorizedKeys(t *testing.T) {
 }
 
 func newTestSSHServerConfig(cfg *Config, certOnly bool) *ssh.ServerConfig {
-	srv := newSSHServerConfig(cfg, certOnly)
+	metrics := NewMetrics()
+	srv := newSSHServerConfig(cfg, certOnly, metrics)
 	if srv == nil {
 		srv = &ssh.ServerConfig{
 			Config: ssh.Config{
@@ -548,7 +551,8 @@ func startServer(ctx context.Context, t *testing.T, cfg Config) (*Server, string
 		<-ctx.Done()
 		ln.Close()
 	}()
-	server := NewServer(cfg)
+	metrics := NewMetrics()
+	server := NewServer(cfg, metrics)
 	go server.serve(ctx, srv, ln)
 	if err := waitForTCPPort(actualAddr, 2*time.Second); err != nil {
 		ln.Close()

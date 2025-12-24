@@ -508,7 +508,8 @@ func TestServerCreation(t *testing.T) {
 		MaxSessions: 5,
 	}
 
-	server := NewServer(cfg)
+	metrics := NewMetrics()
+	server := NewServer(cfg, metrics)
 
 	if server == nil {
 		t.Fatal("NewServer returned nil")
@@ -644,7 +645,8 @@ func TestServerShutdown(t *testing.T) {
 			MaxStartups: 10,
 			MaxSessions: 5,
 		}
-		server := NewServer(cfg)
+		metrics := NewMetrics()
+		server := NewServer(cfg, metrics)
 
 		ln, err := net.Listen("tcp", "127.0.0.1:0")
 		if err != nil {
@@ -756,5 +758,28 @@ func TestNotificationMocked(t *testing.T) {
 	sendTunnelNotification(context.Background(), &cfg, "alice", "1.2.3.4:1111", "5.6.7.8:22")
 	if calls != 2 {
 		t.Fatalf("expected sendMail to be called twice, got %d", calls)
+	}
+}
+
+func TestMetrics(t *testing.T) {
+	m := NewMetrics()
+	m.Enable()
+	
+	m.RecordConnection()
+	m.RecordTunnelOpened()
+	m.RecordBytesIn(1024)
+	m.RecordBytesOut(2048)
+	
+	if m.connectionsTotal.Load() != 1 {
+		t.Errorf("expected 1 connection, got %d", m.connectionsTotal.Load())
+	}
+	if m.tunnelsActive.Load() != 1 {
+		t.Errorf("expected 1 active tunnel, got %d", m.tunnelsActive.Load())
+	}
+	if m.bytesTransferredIn.Load() != 1024 {
+		t.Errorf("expected 1024 bytes in, got %d", m.bytesTransferredIn.Load())
+	}
+	if m.bytesTransferredOut.Load() != 2048 {
+		t.Errorf("expected 2048 bytes out, got %d", m.bytesTransferredOut.Load())
 	}
 }

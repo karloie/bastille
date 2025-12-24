@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"strconv"
@@ -37,6 +38,7 @@ type Server struct {
 	rate      map[string]*rate.Limiter
 	tunnelsMu sync.Mutex
 	tunnels   map[string]int
+	metrics   *Metrics
 }
 
 func main() {
@@ -54,8 +56,26 @@ func main() {
 	handler := slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level})
 	slog.SetDefault(slog.New(handler))
 	slog.Info("Bastille started", "src", "bastille", "version", Version, "commit", GitCommit, "buildTime", BuildTime)
+	
+	metrics := NewMetrics()
+	if cfg.MetricsAddress != "" {
+		metrics.Enable()
+		go func() {
+			mux := http.NewServeMux()
+			mux.Handle("/metrics", metrics.Handler())
+			mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte("ok\n"))
+			})
+			slog.Info("Metrics server starting", "src", "bastille", "addr", cfg.MetricsAddress)
+			if err := http.ListenAndServe(cfg.MetricsAddress, mux); err != nil {
+				slog.Error("metrics server failed", "src", "bastille", "error", err)
+			}
+		}()
+	}
+	
 	certOnly := cfg.AuthMode == "certs"
-	srv := newSSHServerConfig(&cfg, certOnly)
+	srv := newSSHServerConfig(&cfg, certOnly, metrics)
 	if srv == nil {
 		slog.Error("no host keys loaded; refusing to start")
 		os.Exit(1)
@@ -82,7 +102,7 @@ func main() {
 	)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	server := NewServer(cfg)
+	server := NewServer(cfg, metrics)
 	server.serve(ctx, srv, ln)
 }
 
@@ -112,6 +132,11 @@ func (s *Server) serve(ctx context.Context, srv *ssh.ServerConfig, ln net.Listen
 func (s *Server) handleConn(ctx context.Context, c net.Conn, srv *ssh.ServerConfig) {
 	defer c.Close()
 	start := time.Now()
+	s.metrics.RecordConnection()
+	defer func() {
+		s.metrics.RecordConnectionClosed()
+		s.metrics.RecordConnectionDuration(time.Since(start))
+	}()
 	ip, _, _ := net.SplitHostPort(c.RemoteAddr().String())
 	var id [8]byte
 	_, _ = rand.Read(id[:])
@@ -127,6 +152,7 @@ func (s *Server) handleConn(ctx context.Context, c net.Conn, srv *ssh.ServerConf
 		allow := lim.Allow()
 		s.rateMu.Unlock()
 		if !allow {
+			s.metrics.RecordRateLimitHit()
 			logEvent("warn", cid, nil, ip, "rate limited", nil, nil)
 			return
 		}
@@ -135,6 +161,8 @@ func (s *Server) handleConn(ctx context.Context, c net.Conn, srv *ssh.ServerConf
 	sshConn, chans, reqs, err := ssh.NewServerConn(c, srv)
 	_ = c.SetDeadline(time.Time{})
 	if err != nil {
+		s.metrics.RecordHandshakeFailure()
+		s.metrics.RecordConnectionFailed()
 		logEvent("debug", cid, nil, ip, "handshake failed", nil, err)
 		return
 	}
@@ -156,6 +184,7 @@ func (s *Server) handleConn(ctx context.Context, c net.Conn, srv *ssh.ServerConf
 			}
 			dst := targetAddress(ch.ExtraData())
 			if !isTunnelAllowed(sshConn.Permissions, dst) {
+				s.metrics.RecordTunnelDenied()
 				logEventWithDuration("err", cid, sshConn, dst, "tunnel denied", nil, nil, time.Since(start))
 				_ = ch.Reject(ssh.ConnectionFailed, "denied")
 				continue
@@ -196,11 +225,12 @@ func (s *Server) releaseTunnelSlot(user string) {
 	s.tunnelsMu.Unlock()
 }
 
-func NewServer(cfg Config) *Server {
+func NewServer(cfg Config, metrics *Metrics) *Server {
 	return &Server{
 		cfg:     cfg,
 		rate:    make(map[string]*rate.Limiter),
 		tunnels: make(map[string]int),
+		metrics: metrics,
 	}
 }
 
@@ -240,11 +270,20 @@ func (s *Server) proxy(ctx context.Context, cid string, ch ssh.NewChannel, dst s
 		return
 	}
 	go ssh.DiscardRequests(reqs)
+	s.metrics.RecordTunnelOpened()
 	logEventWithDuration("info", cid, sshConn, dst, "tunnel opened", nil, nil, time.Since(start))
 	go sendTunnelNotification(ctx, &s.cfg, sshConn.User(), sshConn.RemoteAddr().String(), dst)
 	done := make(chan struct{}, 2)
-	go func() { _, _ = io.Copy(dstConn, sc); done <- struct{}{} }()
-	go func() { _, _ = io.Copy(sc, dstConn); done <- struct{}{} }()
+	go func() {
+		n, _ := io.Copy(dstConn, sc)
+		s.metrics.RecordBytesOut(n)
+		done <- struct{}{}
+	}()
+	go func() {
+		n, _ := io.Copy(sc, dstConn)
+		s.metrics.RecordBytesIn(n)
+		done <- struct{}{}
+	}()
 	select {
 	case <-ctx.Done():
 		_ = dstConn.Close()
@@ -254,6 +293,7 @@ func (s *Server) proxy(ctx context.Context, cid string, ch ssh.NewChannel, dst s
 		_ = sc.Close()
 	}
 	<-done
+	s.metrics.RecordTunnelClosed()
 	logEventWithDuration("debug", cid, sshConn, dst, "tunnel closed", nil, nil, time.Since(start))
 }
 

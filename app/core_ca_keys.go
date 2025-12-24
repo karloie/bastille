@@ -137,7 +137,7 @@ func parsePermitOptionsFromFile(path string) string {
 	return strings.Join(uniqStrings(permits), ",")
 }
 
-func newSSHServerConfig(cfg *Config, certOnly bool) *ssh.ServerConfig {
+func newSSHServerConfig(cfg *Config, certOnly bool, metrics *Metrics) *ssh.ServerConfig {
 	srv := &ssh.ServerConfig{
 		Config: ssh.Config{
 			Ciphers:      cfg.Ciphers,
@@ -166,6 +166,7 @@ func newSSHServerConfig(cfg *Config, certOnly bool) *ssh.ServerConfig {
 		if certOnly {
 			if _, ok := key.(*ssh.Certificate); !ok {
 				err := ErrCertRequired
+				metrics.RecordAuthDenied()
 				logEvent("err", "", meta, "", "auth denied", keyHash(key), err)
 				return nil, err
 			}
@@ -179,6 +180,7 @@ func newSSHServerConfig(cfg *Config, certOnly bool) *ssh.ServerConfig {
 				if rsaKey, ok := ck.CryptoPublicKey().(*rsa.PublicKey); ok {
 					if rsaKey.N.BitLen() < cfg.RsaMin {
 						err := fmt.Errorf("rsa key too small: %d < %d", rsaKey.N.BitLen(), cfg.RsaMin)
+						metrics.RecordAuthDenied()
 						logEvent("err", "", meta, "", "auth denied", keyHash(key), err)
 						return nil, err
 					}
@@ -191,6 +193,7 @@ func newSSHServerConfig(cfg *Config, certOnly bool) *ssh.ServerConfig {
 		checker := certChecker(cfg, effectiveCAs, cfg.AuthKeys)
 		perms, err := checker.Authenticate(meta, key)
 		if err != nil {
+			metrics.RecordAuthDenied()
 			logEvent("err", "", meta, "", "auth denied", keyHash(key), err)
 			return nil, err
 		}
