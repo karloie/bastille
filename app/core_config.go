@@ -13,135 +13,149 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-const (
-	defaultListenPort = 22222
-	defaultSMTPPort   = 587
-	defaultRateLimit  = 10
-	maxPort           = 65535
-)
-
 type Config struct {
-	ADDRESS string
+	Address string
+	Port    int
 
-	AUTH_KEYS []string
-
-	AUTH_MODE string
-
-	CERT_KEYS []string
-
-	HOST_KEYS []string
-
-	MaxTunnels int
-
-	RateLimit int
-
-	DialTO time.Duration
-
-	LogLevel string
-
-	StrictModes bool
-
-	Testing bool
+	AuthKeys []string
+	CertKeys []string
+	HostKeys []string
 
 	Ciphers []string
+	KEXs    []string
+	MACs    []string
+	RsaMin  int
 
-	KeyExchanges []string
+	AuthMode    string
+	DialTimeout time.Duration
+	LogLevel    string
+	MaxSessions int
+	MaxStartups int
+	StrictMode  bool
+	Testing     bool
 
-	MACs []string
-
-	SMTPHost     string
-	SMTPMail     string
-	SMTPPassFile string
-	SMTPPort     int
-	SMTPUser     string
+	SmtpHost   string
+	SmtpMail   string
+	SmtpSecret string
+	SmtpPort   int
+	SmtpUser   string
 }
 
+const (
+	EnvListenAddress     = "ListenAddress"
+	EnvListenPort        = "Port"
+	EnvListenPortDefault = 22222
+	EnvLogLevel          = "LogLevel"
+
+	EnvAuthMode = "AuthMode"
+
+	EnvAuthKeys = "AuthorizedKeysFile"
+	EnvCertKeys = "TrustedUserCAKeys"
+	EnvHostKeys = "HostKey"
+
+	EnvCiphers = "Ciphers"
+	EnvKEXs    = "KexAlgorithms"
+	EnvMACs    = "MACs"
+	EnvRSAMin  = "RequiredRSASize"
+
+	EnvMaxSessions = "MaxSessions"
+	EnvMaxStartups = "PerSourceMaxStartups"
+	EnvStrictMode  = "StrictModes"
+
+	EnvSmtpHost   = "SmtpHost"
+	EnvSmtpMail   = "SmtpMail"
+	EnvSmtpPort   = "SmtpPort"
+	EnvSmtpSecret = "SmtpSecret"
+	EnvSmtpUser   = "SmtpUser"
+	EnvTesting    = "Testing"
+
+	maxPort = 65535
+)
+
 func LoadConfig() Config {
-	algos := getSupportedAlgos()
-
-	addr := strings.TrimSpace(envStr("LISTEN", ""))
-	if addr == "" {
-		addr = fmt.Sprintf(":%d", envInt("LISTEN_PORT", defaultListenPort))
-	}
-
-	logLevel := strings.ToUpper(envStr("LOGLEVEL", "INFO"))
-
-	hardened := getHardenedDefaults()
-	ciphers := filterToSupported(evalAlgorithms("CIPHERS", hardened.Ciphers), algos.Ciphers)
-	kex := filterToSupported(evalAlgorithms("KEXALGORITHMS", hardened.KeyExchanges), algos.KeyExchanges)
-	macs := filterToSupported(evalAlgorithms("MACS", hardened.MACs), algos.MACs)
-
+	algos := supportedAlgos()
+	hardened := hardenedAlgos()
 	cfg := Config{
-		ADDRESS:      addr,
-		AUTH_MODE:    envStr("AUTHMODE", "optional"),
-		AUTH_KEYS:    splitList(envStr("AUTH_KEYS", "test/home/{user}/authorized_keys")),
-		CERT_KEYS:    splitList(envStr("CERT_KEYS", "/ca")),
-		HOST_KEYS:    splitList(envStr("HOST_KEYS", "/hostkeys")),
-		MaxTunnels:   envInt("MAX_TUNNELS", 5),
-		RateLimit:    envInt("RATE", defaultRateLimit),
-		DialTO:       5 * time.Second,
-		LogLevel:     logLevel,
-		StrictModes:  envBool("STRICTMODES", false),
-		Testing:      envBool("TESTING", false),
-		Ciphers:      ciphers,
-		KeyExchanges: kex,
-		MACs:         macs,
-		SMTPHost:     envStr("SMTP_HOST", ""),
-		SMTPMail:     envStr("SMTP_MAIL", ""),
-		SMTPPort:     envInt("SMTP_PORT", defaultSMTPPort),
-		SMTPUser:     envStr("SMTP_USER", ""),
-		SMTPPassFile: envStr("SMTP_PASS_FILE", "/run/secrets/smtp_pass"),
-	}
+		Address: strings.TrimSpace(envStr(EnvListenAddress, "")),
+		Port:    envInt(EnvListenPort, EnvListenPortDefault),
 
+		AuthKeys: splitList(envStr(EnvAuthKeys, "/home/{user}/.ssh/authorized_keys,/home/{user}")),
+		CertKeys: splitList(envStr(EnvCertKeys, "/home/{user}/.ssh/ca.pub,/ca")),
+		HostKeys: splitList(envStr(EnvHostKeys, "/hostkeys")),
+
+		Ciphers: supported(parseAlgorithmList(EnvCiphers, hardened.Ciphers), algos.Ciphers),
+		KEXs:    supported(parseAlgorithmList(EnvKEXs, hardened.KeyExchanges), algos.KeyExchanges),
+		MACs:    supported(parseAlgorithmList(EnvMACs, hardened.MACs), algos.MACs),
+		RsaMin:  envInt(EnvRSAMin, 3072),
+
+		AuthMode:    envStr(EnvAuthMode, "optional"),
+		DialTimeout: 5 * time.Second,
+		LogLevel:    strings.ToUpper(envStr(EnvLogLevel, "INFO")),
+		MaxSessions: envInt(EnvMaxSessions, 5),
+		MaxStartups: envInt(EnvMaxStartups, 10),
+		StrictMode:  envBool(EnvStrictMode, false),
+		Testing:     envBool(EnvTesting, false),
+
+		SmtpHost:   envStr(EnvSmtpHost, ""),
+		SmtpMail:   envStr(EnvSmtpMail, ""),
+		SmtpPort:   envInt(EnvSmtpPort, 587),
+		SmtpUser:   envStr(EnvSmtpUser, ""),
+		SmtpSecret: envStr(EnvSmtpSecret, "/run/secrets/smtp_pass"),
+	}
 	if err := cfg.Validate(); err != nil {
 		fmt.Fprintf(os.Stderr, "Configuration error: %v\n", err)
 		os.Exit(1)
 	}
-
 	return cfg
 }
 
 func (c Config) Validate() error {
-	if c.MaxTunnels <= 0 {
-		return fmt.Errorf("MAX_TUNNELS must be > 0, got %d", c.MaxTunnels)
+	if c.Port <= 0 || c.Port > maxPort {
+		return fmt.Errorf("Port must be 1-%d, got %d", maxPort, c.Port)
 	}
-	if c.RateLimit <= 0 {
-		return fmt.Errorf("RATE must be > 0, got %d", c.RateLimit)
+	if c.MaxSessions <= 0 {
+		return fmt.Errorf("MaxSessions must be > 0, got %d", c.MaxSessions)
 	}
-	if c.SMTPPort <= 0 || c.SMTPPort > maxPort {
-		return fmt.Errorf("SMTP_PORT must be 1-%d, got %d", maxPort, c.SMTPPort)
+	if c.MaxStartups <= 0 {
+		return fmt.Errorf("MaxStartups must be > 0, got %d", c.MaxStartups)
+	}
+	if c.RsaMin != 0 && c.RsaMin < 1024 {
+		return fmt.Errorf("MinRsaSize must be 0 or >= 1024, got %d", c.RsaMin)
+	}
+	if c.SmtpPort <= 0 || c.SmtpPort > maxPort {
+		return fmt.Errorf("SmtpPort must be 1-%d, got %d", maxPort, c.SmtpPort)
 	}
 	validLevels := []string{"DEBUG", "INFO", "VERBOSE", "WARN", "ERROR"}
 	if !slices.Contains(validLevels, c.LogLevel) {
-		return fmt.Errorf("LOGLEVEL must be one of %v, got %q", validLevels, c.LogLevel)
+		return fmt.Errorf("LogLevel must be one of %v, got %q", validLevels, c.LogLevel)
 	}
-	if c.SMTPHost != "" && c.SMTPMail != "" {
-		if _, err := os.Stat(c.SMTPPassFile); err != nil && !c.Testing {
-			return fmt.Errorf("SMTP enabled but password file not found: %s", c.SMTPPassFile)
+	if c.SmtpHost != "" && c.SmtpMail != "" {
+		if _, err := os.Stat(c.SmtpSecret); err != nil && !c.Testing {
+			return fmt.Errorf("Smtp enabled but password file not found: %s", c.SmtpSecret)
 		}
 	}
 	if len(c.Ciphers) == 0 {
 		return fmt.Errorf("no supported ciphers after filtering")
 	}
-	if len(c.KeyExchanges) == 0 {
+	if len(c.KEXs) == 0 {
 		return fmt.Errorf("no supported key exchange algorithms after filtering")
 	}
 	if len(c.MACs) == 0 {
 		return fmt.Errorf("no supported MAC algorithms after filtering")
 	}
 
-	fixed, patterns := deriveAllowedBases(c.AUTH_KEYS)
+	fixed, patterns := allowedBases(c.AuthKeys)
 	if len(fixed) == 0 && len(patterns) == 0 {
-		if c.StrictModes {
-			return fmt.Errorf("STRICTMODES enabled but no allowed AUTH_KEYS bases could be derived; check AUTH_KEYS")
+		if c.StrictMode {
+			return fmt.Errorf("StrictMode enabled but no allowed AuthorizedKeysFile bases could be derived; check AuthorizedKeysFile")
 		}
-		fmt.Fprintf(os.Stderr, "Warning: no allowed AUTH_KEYS bases could be derived; STRICTMODES is disabled so this will not be enforced\n")
+		logEvent("debug", "", nil, "", "no allowed AuthorizedKeysFile bases derived; StrictMode disabled", nil, nil)
 	}
 
 	return nil
 }
 
-func getSupportedAlgos() (a struct {
+func supportedAlgos() (a struct {
 	Ciphers, KeyExchanges, MACs []string
 }) {
 	supported := ssh.SupportedAlgorithms()
@@ -151,7 +165,7 @@ func getSupportedAlgos() (a struct {
 	return
 }
 
-func getHardenedDefaults() (a struct {
+func hardenedAlgos() (a struct {
 	Ciphers      []string
 	KeyExchanges []string
 	MACs         []string
@@ -180,7 +194,7 @@ func getHardenedDefaults() (a struct {
 	return
 }
 
-func filterToSupported(in, supported []string) []string {
+func supported(in, supported []string) []string {
 	if len(in) == 0 {
 		return nil
 	}
@@ -208,7 +222,7 @@ func filterToSupported(in, supported []string) []string {
 	return uniq
 }
 
-func evalAlgorithms(env string, defaults []string) []string {
+func parseAlgorithmList(env string, defaults []string) []string {
 	val := strings.TrimSpace(os.Getenv(env))
 	if val == "" {
 		return defaults
