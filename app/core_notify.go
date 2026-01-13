@@ -20,18 +20,18 @@ var (
 	sendMail     = smtp.SendMail
 )
 
-func resetSMTPState() {
+func resetSmtpState() {
 	smtpPass = ""
 	smtpPassErr = nil
 	smtpPassOnce = sync.Once{}
 }
 
-func loadSMTPPassword(cfg *Config) (string, error) {
+func loadSmtpPassword(cfg *Config) (string, error) {
 	smtpPassOnce.Do(func() {
-		if cfg.SMTPHost == "" || cfg.SMTPMail == "" {
+		if cfg.SmtpHost == "" || cfg.SmtpMail == "" {
 			return
 		}
-		data, err := os.ReadFile(cfg.SMTPPassFile)
+		data, err := os.ReadFile(cfg.SmtpSecret)
 		if err != nil {
 			smtpPassErr = err
 			return
@@ -41,34 +41,31 @@ func loadSMTPPassword(cfg *Config) (string, error) {
 	return smtpPass, smtpPassErr
 }
 
-func sendTunnelNotification(cfg *Config, user, source, target string) {
-	if cfg.SMTPHost == "" || cfg.SMTPMail == "" {
+func sendTunnelNotification(parent context.Context, cfg *Config, user, source, target string) {
+	if cfg.SmtpHost == "" || cfg.SmtpMail == "" {
 		return
 	}
-
-	pass, err := loadSMTPPassword(cfg)
+	pass, err := loadSmtpPassword(cfg)
 	if err != nil {
 		logEvent("warn", "", nil, "", "smtp password read failed", nil, err)
 		return
 	}
-
 	subject := fmt.Sprintf("SSH Jump: %s -> %s", user, target)
 	body := fmt.Sprintf("User: %s\nSource: %s\nTarget: %s\nTime: %s\n",
 		user, source, target, time.Now().UTC().Format(time.RFC3339))
-
 	msg := fmt.Sprintf("From: %s\r\nTo: %s\r\nSubject: %s\r\n\r\n%s",
-		cfg.SMTPMail, cfg.SMTPMail, subject, body)
-
-	ctx, cancel := context.WithTimeout(context.Background(), smtpTimeout)
+		cfg.SmtpMail, cfg.SmtpMail, subject, body)
+	if parent == nil {
+		parent = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(parent, smtpTimeout)
 	defer cancel()
-
 	done := make(chan error, 1)
 	go func() {
-		addr := fmt.Sprintf("%s:%d", cfg.SMTPHost, cfg.SMTPPort)
-		auth := smtp.PlainAuth("", cfg.SMTPUser, pass, cfg.SMTPHost)
-		done <- sendMail(addr, auth, cfg.SMTPMail, []string{cfg.SMTPMail}, []byte(msg))
+		addr := fmt.Sprintf("%s:%d", cfg.SmtpHost, cfg.SmtpPort)
+		auth := smtp.PlainAuth("", cfg.SmtpUser, pass, cfg.SmtpHost)
+		done <- sendMail(addr, auth, cfg.SmtpMail, []string{cfg.SmtpMail}, []byte(msg))
 	}()
-
 	select {
 	case err := <-done:
 		if err != nil {

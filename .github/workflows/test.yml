@@ -23,7 +23,7 @@ jobs:
       - env:
           NO_COLOR: "1"
         run: |
-          go test -count=1 -coverprofile=coverage.out -covermode=atomic -json ./app/... | go run ./app/test_setup.go fmt
+          go test -count=1 -coverprofile=coverage.out -covermode=atomic -json ./app/... | go run ./app/test_pretty.go
 
       - run: go test -race -count=1 ./app/...
 
