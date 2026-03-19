@@ -9,7 +9,7 @@ go.sum
 
 # Build/CI artifacts and scripts
 Makefile
-Dockerfile
+Containerfile
 
 # Common Go test artifacts
 coverage.out

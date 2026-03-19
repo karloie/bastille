@@ -1,0 +1,21 @@
+name: Re-release Latest Tag
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  rerelease:
+    concurrency:
+      group: rerelease-latest
+      cancel-in-progress: false
+    uses: karloie/gh-workflows/.github/workflows/re-release.yml@main
+    with:
+      image: karloie/bastille
+      tool_ref: main
+    secrets:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+      HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
