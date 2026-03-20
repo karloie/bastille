@@ -30,6 +30,7 @@ jobs:
       event_name: ${{ github.event_name }}
       bump: ${{ inputs.bump }}
       tool_ref: v0.0.26
+      main_path: ./app
     secrets:
       DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
       DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
