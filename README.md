@@ -5,7 +5,7 @@
 [![Go Report Card](https://goreportcard.com/badge/github.com/karloie/bastille)](https://goreportcard.com/report/github.com/karloie/bastille)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Go Version](https://img.shields.io/github/go-mod/go-version/karloie/bastille)](go.mod)
-[![Homebrew Version](https://img.shields.io/badge/dynamic/regex?url=https%3A%2F%2Fraw.githubusercontent.com%2Fkarloie%2Fhomebrew-tap%2Fmain%2Fbastille.rb&search=version%20%22(%3F%3Cversion%3E%5B%5E%22%5D%2B)%22&replace=%24%3Cversion%3E&label=homebrew)](https://github.com/karloie/homebrew-tap)
+[![Homebrew Version](https://img.shields.io/badge/dynamic/regex?url=https%3A%2F%2Fraw.githubusercontent.com%2Fkarloie%2Fhomebrew-tap%2Fmain%2FCasks%2Fbastille.rb&search=version%20%22(%3F%3Cversion%3E%5B%5E%22%5D%2B)%22&replace=%24%3Cversion%3E&label=homebrew)](https://github.com/karloie/homebrew-tap)
 [![Docker Pulls](https://img.shields.io/docker/pulls/karloie/bastille)](https://hub.docker.com/r/karloie/bastille)
 
 <img src="https://raw.githubusercontent.com/karloie/bastille/main/doc/vibe-coded.badge.small.png" alt="Vibe Coded!" width="200" align="right">
