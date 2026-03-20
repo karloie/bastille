@@ -1,4 +1,4 @@
-package main
+package config
 
 import (
 	"encoding/json"
@@ -87,9 +87,9 @@ func LoadConfig() Config {
 		CertKeys: splitList(envStr(EnvCertKeys, "/home/{user}/.ssh/ca.pub,/ca")),
 		HostKeys: splitList(envStr(EnvHostKeys, "/hostkeys")),
 
-		Ciphers: supported(parseAlgorithmList(EnvCiphers, hardened.Ciphers), algos.Ciphers),
-		KEXs:    supported(parseAlgorithmList(EnvKEXs, hardened.KeyExchanges), algos.KeyExchanges),
-		MACs:    supported(parseAlgorithmList(EnvMACs, hardened.MACs), algos.MACs),
+		Ciphers: supported(ParseAlgorithmList(EnvCiphers, hardened.Ciphers), algos.Ciphers),
+		KEXs:    supported(ParseAlgorithmList(EnvKEXs, hardened.KeyExchanges), algos.KeyExchanges),
+		MACs:    supported(ParseAlgorithmList(EnvMACs, hardened.MACs), algos.MACs),
 		RsaMin:  envInt(EnvRSAMin, 3072),
 
 		AuthMode:    envStr(EnvAuthMode, "optional"),
@@ -150,12 +150,12 @@ func (c Config) Validate() error {
 		return fmt.Errorf("no supported MAC algorithms after filtering")
 	}
 
-	fixed, patterns := allowedBases(c.AuthKeys)
+	fixed, patterns := AllowedBases(c.AuthKeys)
 	if len(fixed) == 0 && len(patterns) == 0 {
 		if c.StrictMode {
 			return fmt.Errorf("StrictMode enabled but no allowed AuthorizedKeysFile bases could be derived; check AuthorizedKeysFile")
 		}
-		logEvent("debug", "", nil, "", "no allowed AuthorizedKeysFile bases derived; StrictMode disabled", nil, nil)
+		LogEvent("debug", "", nil, "", "no allowed AuthorizedKeysFile bases derived; StrictMode disabled", nil, nil)
 	}
 
 	return nil
@@ -228,7 +228,7 @@ func supported(in, supported []string) []string {
 	return uniq
 }
 
-func parseAlgorithmList(env string, defaults []string) []string {
+func ParseAlgorithmList(env string, defaults []string) []string {
 	val := strings.TrimSpace(os.Getenv(env))
 	if val == "" {
 		return defaults

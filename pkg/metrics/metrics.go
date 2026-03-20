@@ -1,4 +1,4 @@
-package main
+package metrics
 
 import (
 	"fmt"
@@ -12,21 +12,21 @@ type Metrics struct {
 	enabled bool
 	mu      sync.RWMutex
 
-	connectionsTotal       atomic.Int64
+	ConnectionsTotal       atomic.Int64
 	connectionsFailed      atomic.Int64
 	connectionsActive      atomic.Int64
-	tunnelsActive          atomic.Int64
+	TunnelsActive          atomic.Int64
 	rateLimitHits          atomic.Int64
 	authDenied             atomic.Int64
 	tunnelDenied           atomic.Int64
-	bytesTransferredIn     atomic.Int64
-	bytesTransferredOut    atomic.Int64
+	BytesTransferredIn     atomic.Int64
+	BytesTransferredOut    atomic.Int64
 	handshakeFailures      atomic.Int64
 	connectionDurations    []time.Duration
 	connectionDurationsMu  sync.Mutex
 }
 
-func NewMetrics() *Metrics {
+func New() *Metrics {
 	return &Metrics{
 		enabled:             false,
 		connectionDurations: make([]time.Duration, 0, 1000),
@@ -43,7 +43,7 @@ func (m *Metrics) RecordConnection() {
 	if !m.enabled {
 		return
 	}
-	m.connectionsTotal.Add(1)
+	m.ConnectionsTotal.Add(1)
 	m.connectionsActive.Add(1)
 }
 
@@ -65,14 +65,14 @@ func (m *Metrics) RecordTunnelOpened() {
 	if !m.enabled {
 		return
 	}
-	m.tunnelsActive.Add(1)
+	m.TunnelsActive.Add(1)
 }
 
 func (m *Metrics) RecordTunnelClosed() {
 	if !m.enabled {
 		return
 	}
-	m.tunnelsActive.Add(-1)
+	m.TunnelsActive.Add(-1)
 }
 
 func (m *Metrics) RecordRateLimitHit() {
@@ -107,14 +107,14 @@ func (m *Metrics) RecordBytesIn(n int64) {
 	if !m.enabled {
 		return
 	}
-	m.bytesTransferredIn.Add(n)
+	m.BytesTransferredIn.Add(n)
 }
 
 func (m *Metrics) RecordBytesOut(n int64) {
 	if !m.enabled {
 		return
 	}
-	m.bytesTransferredOut.Add(n)
+	m.BytesTransferredOut.Add(n)
 }
 
 func (m *Metrics) RecordConnectionDuration(d time.Duration) {
@@ -140,7 +140,7 @@ func (m *Metrics) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	fmt.Fprintf(w, "# HELP bastille_connections_total Total number of connection attempts\n")
 	fmt.Fprintf(w, "# TYPE bastille_connections_total counter\n")
-	fmt.Fprintf(w, "bastille_connections_total %d\n", m.connectionsTotal.Load())
+	fmt.Fprintf(w, "bastille_connections_total %d\n", m.ConnectionsTotal.Load())
 
 	fmt.Fprintf(w, "# HELP bastille_connections_failed_total Total number of failed connections\n")
 	fmt.Fprintf(w, "# TYPE bastille_connections_failed_total counter\n")
@@ -152,7 +152,7 @@ func (m *Metrics) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	fmt.Fprintf(w, "# HELP bastille_tunnels_active Current number of active tunnels\n")
 	fmt.Fprintf(w, "# TYPE bastille_tunnels_active gauge\n")
-	fmt.Fprintf(w, "bastille_tunnels_active %d\n", m.tunnelsActive.Load())
+	fmt.Fprintf(w, "bastille_tunnels_active %d\n", m.TunnelsActive.Load())
 
 	fmt.Fprintf(w, "# HELP bastille_rate_limit_hits_total Total number of rate limit hits\n")
 	fmt.Fprintf(w, "# TYPE bastille_rate_limit_hits_total counter\n")
@@ -172,11 +172,11 @@ func (m *Metrics) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	fmt.Fprintf(w, "# HELP bastille_bytes_transferred_in_total Total bytes received\n")
 	fmt.Fprintf(w, "# TYPE bastille_bytes_transferred_in_total counter\n")
-	fmt.Fprintf(w, "bastille_bytes_transferred_in_total %d\n", m.bytesTransferredIn.Load())
+	fmt.Fprintf(w, "bastille_bytes_transferred_in_total %d\n", m.BytesTransferredIn.Load())
 
 	fmt.Fprintf(w, "# HELP bastille_bytes_transferred_out_total Total bytes sent\n")
 	fmt.Fprintf(w, "# TYPE bastille_bytes_transferred_out_total counter\n")
-	fmt.Fprintf(w, "bastille_bytes_transferred_out_total %d\n", m.bytesTransferredOut.Load())
+	fmt.Fprintf(w, "bastille_bytes_transferred_out_total %d\n", m.BytesTransferredOut.Load())
 
 	m.connectionDurationsMu.Lock()
 	durations := make([]time.Duration, len(m.connectionDurations))

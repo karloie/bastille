@@ -1,22 +1,23 @@
 # Builder: build a static bastille binary
-FROM golang:1.24-alpine AS builder
+FROM golang:1.26-alpine AS builder
 
-ARG VERSION=dev
-ARG GIT_COMMIT=unknown
-ARG BUILD_TIME
+ARG BUILD_VERSION=dev
+ARG BUILD_COMMIT=unknown
+ARG BUILD_DATE
 
 ARG GOPROXY=https://proxy.golang.org,direct
 ENV GOPROXY=$GOPROXY
 
 WORKDIR /src
 COPY go.mod go.sum ./
-COPY app app
+COPY cmd cmd
+COPY pkg pkg
 RUN mkdir -p /out && CGO_ENABLED=0 GOOS=linux \
     go build -trimpath -ldflags "-s -w \
-    -X main.Version=${VERSION} \
-    -X main.GitCommit=${GIT_COMMIT} \
-    -X main.BuildTime=${BUILD_TIME}" \
-    -o /out/bastille ./app
+    -X main.Version=${BUILD_VERSION} \
+    -X main.GitCommit=${BUILD_COMMIT} \
+    -X main.BuildTime=${BUILD_DATE}" \
+    -o /out/bastille ./cmd/bastille
 
 
 FROM alpine:3.23

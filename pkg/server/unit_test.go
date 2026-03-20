@@ -1,4 +1,4 @@
-package main
+package server
 
 import (
 	"context"
@@ -14,6 +14,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/karloie/bastille/pkg/config"
+	"github.com/karloie/bastille/pkg/crypto"
+	"github.com/karloie/bastille/pkg/metrics"
+
 	"golang.org/x/crypto/ssh"
 )
 
@@ -22,8 +26,8 @@ func rootJoin(parts ...string) string {
 	return filepath.Join(all...)
 }
 
-func miniConfig() Config {
-	return Config{
+func miniConfig() config.Config {
+	return config.Config{
 		Port:        22222,
 		AuthKeys:    []string{},
 		CertKeys:    []string{},
@@ -49,11 +53,11 @@ func miniConfig() Config {
 
 func clearEnv() {
 	for _, k := range []string{
-		EnvListenAddress, EnvListenPort, EnvMaxSessions, EnvMaxStartups, EnvLogLevel, EnvStrictMode, EnvAuthMode,
-		EnvAuthKeys, EnvCertKeys, EnvHostKeys,
-		EnvCiphers, EnvKEXs, EnvMACs, EnvRSAMin,
-		EnvSmtpPort, EnvSmtpHost, EnvSmtpMail, EnvSmtpUser, EnvSmtpSecret,
-		EnvTesting,
+		config.EnvListenAddress, config.EnvListenPort, config.EnvMaxSessions, config.EnvMaxStartups, config.EnvLogLevel, config.EnvStrictMode, config.EnvAuthMode,
+		config.EnvAuthKeys, config.EnvCertKeys, config.EnvHostKeys,
+		config.EnvCiphers, config.EnvKEXs, config.EnvMACs, config.EnvRSAMin,
+		config.EnvSmtpPort, config.EnvSmtpHost, config.EnvSmtpMail, config.EnvSmtpUser, config.EnvSmtpSecret,
+		config.EnvTesting,
 	} {
 		os.Unsetenv(k)
 	}
@@ -61,7 +65,7 @@ func clearEnv() {
 
 func TestLoadConfigDefaults(t *testing.T) {
 	clearEnv()
-	cfg := LoadConfig()
+	cfg := config.LoadConfig()
 
 	if cfg.Address != "" {
 		t.Fatalf("expected default ListenAddress to be empty, got %q", cfg.Address)
@@ -87,10 +91,10 @@ func TestLoadConfigDefaults(t *testing.T) {
 
 func TestLoadConfigEnvOverrides(t *testing.T) {
 	clearEnv()
-	setEnv(t, EnvListenAddress, "0.0.0.0")
-	setEnv(t, EnvListenPort, "10022")
+	setEnv(t, config.EnvListenAddress, "0.0.0.0")
+	setEnv(t, config.EnvListenPort, "10022")
 
-	cfg := LoadConfig()
+	cfg := config.LoadConfig()
 	if cfg.Address != "0.0.0.0" {
 		t.Fatalf("ListenAddress override failed, got %q", cfg.Address)
 	}
@@ -130,8 +134,8 @@ func TestParseAlgorithmListModifiers(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			clearEnv()
-			setEnv(t, EnvCiphers, tc.env)
-			got := parseAlgorithmList("Ciphers", tc.def)
+			setEnv(t, config.EnvCiphers, tc.env)
+			got := config.ParseAlgorithmList("Ciphers", tc.def)
 			if !tc.want(got) {
 				t.Fatalf("unexpected result: env=%q def=%v got=%v", tc.env, tc.def, got)
 			}
@@ -145,14 +149,14 @@ func TestConfigValidate(t *testing.T) {
 	type tc struct {
 		name string
 		env  map[string]string
-		cfg  func() Config
+		cfg  func() config.Config
 		want bool
 	}
 	cases := []tc{
 		{
 			name: "invalid MaxSessions",
-			env:  map[string]string{EnvMaxSessions: "0"},
-			cfg: func() Config {
+			env:  map[string]string{config.EnvMaxSessions: "0"},
+			cfg: func() config.Config {
 				c := miniConfig()
 				c.MaxSessions = 0
 				return c
@@ -161,8 +165,8 @@ func TestConfigValidate(t *testing.T) {
 		},
 		{
 			name: "invalid MaxStartups",
-			env:  map[string]string{EnvMaxStartups: "-1"},
-			cfg: func() Config {
+			env:  map[string]string{config.EnvMaxStartups: "-1"},
+			cfg: func() config.Config {
 				c := miniConfig()
 				c.MaxStartups = -1
 				return c
@@ -171,8 +175,8 @@ func TestConfigValidate(t *testing.T) {
 		},
 		{
 			name: "invalid MinRsaSize too small",
-			env:  map[string]string{EnvRSAMin: "512"},
-			cfg: func() Config {
+			env:  map[string]string{config.EnvRSAMin: "512"},
+			cfg: func() config.Config {
 				c := miniConfig()
 				c.RsaMin = 512
 				return c
@@ -181,8 +185,8 @@ func TestConfigValidate(t *testing.T) {
 		},
 		{
 			name: "MinRsaSize zero allowed",
-			env:  map[string]string{EnvRSAMin: "0"},
-			cfg: func() Config {
+			env:  map[string]string{config.EnvRSAMin: "0"},
+			cfg: func() config.Config {
 				c := miniConfig()
 				c.RsaMin = 0
 				return c
@@ -191,8 +195,8 @@ func TestConfigValidate(t *testing.T) {
 		},
 		{
 			name: "MinRsaSize valid",
-			env:  map[string]string{EnvRSAMin: "3072"},
-			cfg: func() Config {
+			env:  map[string]string{config.EnvRSAMin: "3072"},
+			cfg: func() config.Config {
 				c := miniConfig()
 				c.RsaMin = 3072
 				return c
@@ -201,9 +205,9 @@ func TestConfigValidate(t *testing.T) {
 		},
 		{
 			name: "invalid LogLevel",
-			env:  map[string]string{EnvLogLevel: "INVALID"},
-			cfg: func() Config {
-				return Config{
+			env:  map[string]string{config.EnvLogLevel: "INVALID"},
+			cfg: func() config.Config {
+				return config.Config{
 					MaxSessions: 5, MaxStartups: 10, LogLevel: "INVALID", SmtpPort: 587,
 					Ciphers: []string{"test"}, KEXs: []string{"test"}, MACs: []string{"test"},
 				}
@@ -212,9 +216,9 @@ func TestConfigValidate(t *testing.T) {
 		},
 		{
 			name: "invalid Smtp port",
-			env:  map[string]string{EnvSmtpPort: "99999"},
-			cfg: func() Config {
-				return Config{
+			env:  map[string]string{config.EnvSmtpPort: "99999"},
+			cfg: func() config.Config {
+				return config.Config{
 					MaxSessions: 5, MaxStartups: 10, LogLevel: "INFO", SmtpPort: 99999,
 					Ciphers: []string{"test"}, KEXs: []string{"test"}, MACs: []string{"test"},
 				}
@@ -223,7 +227,7 @@ func TestConfigValidate(t *testing.T) {
 		},
 		{
 			name: "StrictMode enabled errors when no AuthorizedKeysFile bases derived",
-			cfg: func() Config {
+			cfg: func() config.Config {
 				c := miniConfig()
 				c.StrictMode = true
 				c.AuthKeys = []string{"/*.pub"}
@@ -345,7 +349,7 @@ func TestAllowedBases(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			fixed, patterns := allowedBases(tc.in)
+			fixed, patterns := config.AllowedBases(tc.in)
 
 			if tc.name == "glob root edge" {
 				if len(patterns) != 0 {
@@ -399,7 +403,7 @@ func TestMatchesUser(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			base, ok := matchesUser(tc.pattern, tc.absPath)
+			base, ok := config.MatchesUser(tc.pattern, tc.absPath)
 			if ok != tc.wantOK {
 				t.Fatalf("unexpected ok for pattern %q path %q: got %v want %v", tc.pattern, tc.absPath, ok, tc.wantOK)
 			}
@@ -421,7 +425,7 @@ func TestAllowedBasesDeduplication(t *testing.T) {
 		rootJoin("home", "{user}", "random", "..", ".ssh", "extra"),
 	}
 
-	_, patterns := allowedBases(auth)
+	_, patterns := config.AllowedBases(auth)
 
 	wantPatternsSet := asSet([]string{
 		rootJoin("home", "{user}"),
@@ -475,7 +479,7 @@ func TestAllowedTunnel(t *testing.T) {
 			name: "allows when permitopen matches",
 			perms: &ssh.Permissions{
 				Extensions: map[string]string{
-					permissionKey: `permitopen="127.0.0.1:22"`,
+					crypto.PermissionKey: `permitopen="127.0.0.1:22"`,
 				},
 			},
 			dst:     "127.0.0.1:22",
@@ -485,7 +489,7 @@ func TestAllowedTunnel(t *testing.T) {
 			name: "denies when permitopen does not match",
 			perms: &ssh.Permissions{
 				Extensions: map[string]string{
-					permissionKey: `permitopen="127.0.0.1:22"`,
+					crypto.PermissionKey: `permitopen="127.0.0.1:22"`,
 				},
 			},
 			dst:     "127.0.0.1:23",
@@ -503,13 +507,13 @@ func TestAllowedTunnel(t *testing.T) {
 }
 
 func TestServerCreation(t *testing.T) {
-	cfg := Config{
+	cfg := config.Config{
 		MaxStartups: 10,
 		MaxSessions: 5,
 	}
 
-	metrics := NewMetrics()
-	server := NewServer(cfg, metrics)
+	metrics := metrics.New()
+	server := New(cfg, metrics)
 
 	if server == nil {
 		t.Fatal("NewServer returned nil")
@@ -634,19 +638,19 @@ func TestLogEvent(t *testing.T) {
 				}
 			}()
 
-			logEvent(tt.level, tt.cid, nil, tt.dst, tt.msg, tt.value, tt.err)
+			config.LogEvent(tt.level, tt.cid, nil, tt.dst, tt.msg, tt.value, tt.err)
 		})
 	}
 }
 
 func TestServerShutdown(t *testing.T) {
 	t.Run("stops on context cancel", func(t *testing.T) {
-		cfg := Config{
+		cfg := config.Config{
 			MaxStartups: 10,
 			MaxSessions: 5,
 		}
-		metrics := NewMetrics()
-		server := NewServer(cfg, metrics)
+		metrics := metrics.New()
+		server := New(cfg, metrics)
 
 		ln, err := net.Listen("tcp", "127.0.0.1:0")
 		if err != nil {
@@ -660,7 +664,7 @@ func TestServerShutdown(t *testing.T) {
 
 		done := make(chan struct{})
 		go func() {
-			server.serve(ctx, sshCfg, ln)
+			server.Serve(ctx, sshCfg, ln)
 			close(done)
 		}()
 
@@ -687,7 +691,7 @@ func TestConstants(t *testing.T) {
 }
 
 func TestNotificationDisabled(t *testing.T) {
-	cfg := Config{
+	cfg := config.Config{
 		SmtpHost: "",
 		SmtpMail: "",
 	}
@@ -695,7 +699,7 @@ func TestNotificationDisabled(t *testing.T) {
 }
 
 func TestNotificationMissingPassword(t *testing.T) {
-	cfg := Config{
+	cfg := config.Config{
 		SmtpHost:   "smtp.example.com",
 		SmtpMail:   "test@example.com",
 		SmtpPort:   587,
@@ -711,7 +715,7 @@ func TestNotificationValidConfig(t *testing.T) {
 	if err := os.WriteFile(passFile, []byte("testpassword\n"), 0600); err != nil {
 		t.Fatalf("failed to write password file: %v", err)
 	}
-	cfg := Config{
+	cfg := config.Config{
 		SmtpHost:   "smtp.example.com",
 		SmtpMail:   "test@example.com",
 		SmtpPort:   587,
@@ -738,7 +742,7 @@ func TestNotificationMocked(t *testing.T) {
 		return nil
 	}
 
-	cfg := Config{
+	cfg := config.Config{
 		SmtpHost:   "smtp.example.com",
 		SmtpMail:   "test@example.com",
 		SmtpPort:   587,
@@ -762,24 +766,24 @@ func TestNotificationMocked(t *testing.T) {
 }
 
 func TestMetrics(t *testing.T) {
-	m := NewMetrics()
+	m := metrics.New()
 	m.Enable()
-	
+
 	m.RecordConnection()
 	m.RecordTunnelOpened()
 	m.RecordBytesIn(1024)
 	m.RecordBytesOut(2048)
-	
-	if m.connectionsTotal.Load() != 1 {
-		t.Errorf("expected 1 connection, got %d", m.connectionsTotal.Load())
+
+	if m.ConnectionsTotal.Load() != 1 {
+		t.Errorf("expected 1 connection, got %d", m.ConnectionsTotal.Load())
 	}
-	if m.tunnelsActive.Load() != 1 {
-		t.Errorf("expected 1 active tunnel, got %d", m.tunnelsActive.Load())
+	if m.TunnelsActive.Load() != 1 {
+		t.Errorf("expected 1 active tunnel, got %d", m.TunnelsActive.Load())
 	}
-	if m.bytesTransferredIn.Load() != 1024 {
-		t.Errorf("expected 1024 bytes in, got %d", m.bytesTransferredIn.Load())
+	if m.BytesTransferredIn.Load() != 1024 {
+		t.Errorf("expected 1024 bytes in, got %d", m.BytesTransferredIn.Load())
 	}
-	if m.bytesTransferredOut.Load() != 2048 {
-		t.Errorf("expected 2048 bytes out, got %d", m.bytesTransferredOut.Load())
+	if m.BytesTransferredOut.Load() != 2048 {
+		t.Errorf("expected 2048 bytes out, got %d", m.BytesTransferredOut.Load())
 	}
 }

@@ -1,4 +1,4 @@
-package main
+package server
 
 import (
 	"context"
@@ -18,6 +18,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/karloie/bastille/pkg/config"
+	"github.com/karloie/bastille/pkg/crypto"
+	"github.com/karloie/bastille/pkg/metrics"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -115,9 +118,9 @@ func mustAuthorizedKeyLine(t *testing.T, signer ssh.Signer, prefixOpts string) s
 	return key + "\n"
 }
 
-func mustLoadCertPermit(t *testing.T, cfg *Config, user string) string {
+func mustLoadCertPermit(t *testing.T, cfg *config.Config, user string) string {
 	t.Helper()
-	opts := loadCertPermit(cfg, user)
+	opts := crypto.LoadCertPermit(cfg, user)
 	if opts == "" {
 		t.Fatalf("expected non-empty permit options for user %q", user)
 	}
@@ -173,7 +176,7 @@ type testHarness struct {
 	target2HostKey ssh.Signer
 
 	runTargets int // 0 = unchanged/default, 1 = one target, 2 = two targets
-	preRunHook func(t *testing.T, h *testHarness, cfg *Config)
+	preRunHook func(t *testing.T, h *testHarness, cfg *config.Config)
 }
 
 type HarnessScenario struct {
@@ -229,7 +232,7 @@ func (h *testHarness) WithTwoTargets() *testHarness {
 	return h
 }
 
-func (h *testHarness) WithPreRunConfig(fn func(t *testing.T, h *testHarness, cfg *Config)) *testHarness {
+func (h *testHarness) WithPreRunConfig(fn func(t *testing.T, h *testHarness, cfg *config.Config)) *testHarness {
 	h.preRunHook = fn
 	return h
 }
@@ -347,8 +350,8 @@ func harnessLogLevelFromEnv() string {
 	return "WARN"
 }
 
-func harnessDefaultConfig(tmpDir string, mode string) Config {
-	return Config{
+func harnessDefaultConfig(tmpDir string, mode string) config.Config {
+	return config.Config{
 		Address:  "127.0.0.1",
 		Port:     0,
 		LogLevel: harnessLogLevelFromEnv(),
@@ -374,11 +377,11 @@ func harnessDefaultConfig(tmpDir string, mode string) Config {
 	}
 }
 
-func (h *testHarness) run(t *testing.T, opts ...func(*Config)) *Server {
+func (h *testHarness) run(t *testing.T, opts ...func(*config.Config)) *Server {
 	return h.runWithMode(t, "keys", opts...)
 }
 
-func (h *testHarness) RunScenario(t *testing.T, opts ...func(*Config)) HarnessScenario {
+func (h *testHarness) RunScenario(t *testing.T, opts ...func(*config.Config)) HarnessScenario {
 	h.startConfiguredTargets(t)
 
 	cfg := harnessDefaultConfig(h.tmpDir, "keys")
@@ -400,7 +403,7 @@ func (h *testHarness) RunScenario(t *testing.T, opts ...func(*Config)) HarnessSc
 	return h.Scenario()
 }
 
-func (h *testHarness) runWithMode(t *testing.T, mode string, opts ...func(*Config)) *Server {
+func (h *testHarness) runWithMode(t *testing.T, mode string, opts ...func(*config.Config)) *Server {
 	cfg := harnessDefaultConfig(h.tmpDir, mode)
 	for _, opt := range opts {
 		opt(&cfg)
@@ -427,9 +430,9 @@ func (h *testHarness) runWithMode(t *testing.T, mode string, opts ...func(*Confi
 		ln.Close()
 	}()
 
-	metrics := NewMetrics()
-	server := NewServer(cfg, metrics)
-	go server.serve(h.ctx, srv, ln)
+	metrics := metrics.New()
+	server := New(cfg, metrics)
+	go server.Serve(h.ctx, srv, ln)
 
 	actualAddr := ln.Addr().String()
 	if err := waitForTCPPort(actualAddr, 2*time.Second); err != nil {
@@ -443,7 +446,7 @@ func (h *testHarness) runWithCertOnly(t *testing.T) *Server {
 	return h.runWithMode(t, "certs")
 }
 
-func (h *testHarness) RunScenarioWithCertOnly(t *testing.T, opts ...func(*Config)) HarnessScenario {
+func (h *testHarness) RunScenarioWithCertOnly(t *testing.T, opts ...func(*config.Config)) HarnessScenario {
 	h.startConfiguredTargets(t)
 
 	cfg := harnessDefaultConfig(h.tmpDir, "certs")
@@ -466,9 +469,9 @@ func (h *testHarness) RunScenarioWithCertOnly(t *testing.T, opts ...func(*Config
 		ln.Close()
 	}()
 
-	metrics := NewMetrics()
-	server := NewServer(cfg, metrics)
-	go server.serve(h.ctx, srv, ln)
+	metrics := metrics.New()
+	server := New(cfg, metrics)
+	go server.Serve(h.ctx, srv, ln)
 
 	actualAddr := ln.Addr().String()
 	if err := waitForTCPPort(actualAddr, 2*time.Second); err != nil {
@@ -525,9 +528,9 @@ func (h *testHarness) writeAuthorizedKeys(t *testing.T) {
 	write("nani", naniPrefix)
 }
 
-func newTestSSHServerConfig(cfg *Config, certOnly bool) *ssh.ServerConfig {
-	metrics := NewMetrics()
-	srv := newSSHServerConfig(cfg, certOnly, metrics)
+func newTestSSHServerConfig(cfg *config.Config, certOnly bool) *ssh.ServerConfig {
+	metrics := metrics.New()
+	srv := crypto.NewSSHServerConfig(cfg, certOnly, metrics)
 	if srv == nil {
 		srv = &ssh.ServerConfig{
 			Config: ssh.Config{
@@ -540,7 +543,7 @@ func newTestSSHServerConfig(cfg *Config, certOnly bool) *ssh.ServerConfig {
 	return srv
 }
 
-func startServer(ctx context.Context, t *testing.T, cfg Config) (*Server, string, error) {
+func startServer(ctx context.Context, t *testing.T, cfg config.Config) (*Server, string, error) {
 	srv := newTestSSHServerConfig(&cfg, cfg.AuthMode == "certs")
 	ln, err := net.Listen("tcp", cfg.Address+":0")
 	if err != nil {
@@ -551,9 +554,9 @@ func startServer(ctx context.Context, t *testing.T, cfg Config) (*Server, string
 		<-ctx.Done()
 		ln.Close()
 	}()
-	metrics := NewMetrics()
-	server := NewServer(cfg, metrics)
-	go server.serve(ctx, srv, ln)
+	metrics := metrics.New()
+	server := New(cfg, metrics)
+	go server.Serve(ctx, srv, ln)
 	if err := waitForTCPPort(actualAddr, 2*time.Second); err != nil {
 		ln.Close()
 		return nil, "", err

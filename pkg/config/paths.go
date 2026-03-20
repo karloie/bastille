@@ -1,4 +1,4 @@
-package main
+package config
 
 import (
 	"os"
@@ -6,22 +6,26 @@ import (
 	"strings"
 )
 
-func isAuthKeysPathAllowed(cfg *Config, path string) bool {
+const (
+	permGroupOther = 0o022
+)
+
+func IsAuthKeysPathAllowed(cfg *Config, path string) bool {
 	if !isBasicPathValid(path) {
-		logEvent("err", "", nil, path, "path denied (authorized_keys: basic)", nil, nil)
+		LogEvent("err", "", nil, path, "path denied (authorized_keys: basic)", nil, nil)
 		return false
 	}
 	if cfg == nil || !cfg.StrictMode {
 		return true
 	}
 	if !isStrictPathValid(cfg, path) {
-		logEvent("err", "", nil, path, "path denied (authorized_keys: strict)", nil, nil)
+		LogEvent("err", "", nil, path, "path denied (authorized_keys: strict)", nil, nil)
 		return false
 	}
 	return true
 }
 
-func expandPathSpecs(
+func ExpandPathSpecs(
 	specs []string,
 	user string,
 	allowDirEntry func(dir string, e os.DirEntry) bool,
@@ -92,14 +96,14 @@ func isAllowed(absPath string, fixedBases []string, patternedBases []string) (st
 		}
 	}
 	for _, p := range patternedBases {
-		if base, ok := matchesUser(p, absPath); ok {
+		if base, ok := MatchesUser(p, absPath); ok {
 			return base, true
 		}
 	}
 	return "", false
 }
 
-func allowedBases(templates []string) (fixed []string, patterns []string) {
+func AllowedBases(templates []string) (fixed []string, patterns []string) {
 	for _, tmpl := range templates {
 		t := strings.TrimSpace(tmpl)
 		if t == "" {
@@ -146,10 +150,10 @@ func allowedBases(templates []string) (fixed []string, patterns []string) {
 			}
 		}
 	}
-	return uniqStrings(fixed), uniqStrings(patterns)
+	return UniqStrings(fixed), UniqStrings(patterns)
 }
 
-func uniqStrings(in []string) []string {
+func UniqStrings(in []string) []string {
 	seen := make(map[string]struct{}, len(in))
 	out := make([]string, 0, len(in))
 	for _, s := range in {
@@ -166,7 +170,7 @@ func uniqStrings(in []string) []string {
 	return out
 }
 
-func matchesUser(pattern string, absPath string) (string, bool) {
+func MatchesUser(pattern string, absPath string) (string, bool) {
 	idx := strings.Index(pattern, "{user}")
 	if idx < 0 {
 		return "", false
@@ -287,7 +291,7 @@ func isStrictPathValid(cfg *Config, path string) bool {
 	} else {
 		return false
 	}
-	fixedBases, patternedBases := allowedBases(cfg.AuthKeys)
+	fixedBases, patternedBases := AllowedBases(cfg.AuthKeys)
 	matchedBase, ok := isAllowed(absPath, fixedBases, patternedBases)
 	if !ok || matchedBase == "" {
 		return false
@@ -333,7 +337,7 @@ func isPathValid(cfg *Config, path string) bool {
 	return isStrictPathValid(cfg, path)
 }
 
-func isCertPathAllowed(cfg *Config, path string) bool {
+func IsCertPathAllowed(cfg *Config, path string) bool {
 	fi, err := os.Lstat(path)
 	if err != nil {
 		return false
@@ -357,7 +361,7 @@ func isCertPathAllowed(cfg *Config, path string) bool {
 	} else {
 		return false
 	}
-	fixedBases, patternedBases := allowedBases(cfg.CertKeys)
+	fixedBases, patternedBases := AllowedBases(cfg.CertKeys)
 	if len(fixedBases) == 0 && len(patternedBases) == 0 {
 		return false
 	}

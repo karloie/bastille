@@ -1,4 +1,4 @@
-package main
+package crypto
 
 import (
 	"bufio"
@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/karloie/bastille/pkg/config"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -20,7 +21,7 @@ var (
 )
 
 const (
-	permissionKey     = "opts"
+	PermissionKey     = "opts"
 	fingerprintLength = 16
 )
 
@@ -57,7 +58,7 @@ func matchPermitOpenRule(r permitOpenRule, dstHost, dstPort string) bool {
 	return hostOK && portOK
 }
 
-func isPermitAllowed(opts, dst string) bool {
+func IsPermitAllowed(opts, dst string) bool {
 	if opts == "" {
 		return false
 	}
@@ -82,7 +83,7 @@ func isPermitAllowed(opts, dst string) bool {
 	return false
 }
 
-func certChecker(cfg *Config, caPub []ssh.PublicKey, authFiles []string) *ssh.CertChecker {
+func certChecker(cfg *config.Config, caPub []ssh.PublicKey, authFiles []string) *ssh.CertChecker {
 	return &ssh.CertChecker{
 		IsUserAuthority: func(key ssh.PublicKey) bool {
 			for _, k := range caPub {
@@ -94,11 +95,11 @@ func certChecker(cfg *Config, caPub []ssh.PublicKey, authFiles []string) *ssh.Ce
 		},
 		UserKeyFallback: func(conn ssh.ConnMetadata, pubKey ssh.PublicKey) (*ssh.Permissions, error) {
 			user := rxUser.ReplaceAllString(conn.User(), "")
-			candidates := expandPathSpecs(authFiles, user, func(_ string, e os.DirEntry) bool {
+			candidates := config.ExpandPathSpecs(authFiles, user, func(_ string, e os.DirEntry) bool {
 				return !e.IsDir()
 			}, nil)
 
-			for _, path := range uniqStrings(candidates) {
+			for _, path := range config.UniqStrings(candidates) {
 				if perm, ok := checkKeyPermissions(cfg, path, pubKey); ok {
 					return perm, nil
 				}
@@ -108,8 +109,8 @@ func certChecker(cfg *Config, caPub []ssh.PublicKey, authFiles []string) *ssh.Ce
 	}
 }
 
-func checkKeyPermissions(cfg *Config, path string, key ssh.PublicKey) (*ssh.Permissions, bool) {
-	if !isAuthKeysPathAllowed(cfg, path) {
+func checkKeyPermissions(cfg *config.Config, path string, key ssh.PublicKey) (*ssh.Permissions, bool) {
+	if !config.IsAuthKeysPathAllowed(cfg, path) {
 		return nil, false
 	}
 
@@ -125,7 +126,7 @@ func checkKeyPermissions(cfg *Config, path string, key ssh.PublicKey) (*ssh.Perm
 		if err == nil && areKeysEqual(pub, key) {
 			return &ssh.Permissions{
 				Extensions: map[string]string{
-					permissionKey: strings.Join(opts, ","),
+					PermissionKey: strings.Join(opts, ","),
 				},
 			}, true
 		}

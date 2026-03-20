@@ -1,6 +1,7 @@
-package main
+package server
 
 import (
+	"github.com/karloie/bastille/pkg/config"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -258,7 +259,7 @@ func TestTrustedUserCAKeys(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			h := newHarness(t, defaultTestTimeout).
 				WithOneTarget().
-				WithPreRunConfig(func(t *testing.T, h *testHarness, cfg *Config) {
+				WithPreRunConfig(func(t *testing.T, h *testHarness, cfg *config.Config) {
 
 					cfg.CertKeys = []string{strings.ReplaceAll(tc.certKey, "{tmp}", h.TmpDir())}
 					cfg.AuthMode = "certs"
@@ -285,7 +286,7 @@ func TestPerSourceRateLimit(t *testing.T) {
 	h := newHarness(t, shortTestTimeout).WithOneTarget()
 	defer h.Close()
 
-	s := h.RunScenario(t, func(c *Config) {
+	s := h.RunScenario(t, func(c *config.Config) {
 		c.MaxStartups = 3
 	})
 
@@ -318,7 +319,7 @@ func TestMaxSessionsLimit(t *testing.T) {
 	h := newHarness(t, shortTestTimeout).WithOneTarget()
 	defer h.Close()
 
-	s := h.RunScenario(t, func(c *Config) {
+	s := h.RunScenario(t, func(c *config.Config) {
 		c.MaxSessions = 2
 	})
 

@@ -1,4 +1,4 @@
-package main
+package crypto
 
 import (
 	"bufio"
@@ -8,29 +8,31 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/karloie/bastille/pkg/config"
+	"github.com/karloie/bastille/pkg/metrics"
 	"golang.org/x/crypto/ssh"
 )
 
-func isCAPathAllowed(cfg *Config, path string, strictLogMsg string) bool {
-	if !isCertPathAllowed(cfg, path) {
+func isCAPathAllowed(cfg *config.Config, path string, strictLogMsg string) bool {
+	if !config.IsCertPathAllowed(cfg, path) {
 		if strictLogMsg != "" {
-			logEvent("warn", "", nil, path, strictLogMsg, nil, nil)
+			config.LogEvent("warn", "", nil, path, strictLogMsg, nil, nil)
 		} else {
-			logEvent("err", "", nil, path, "path denied (ca key)", nil, nil)
+			config.LogEvent("err", "", nil, path, "path denied (ca key)", nil, nil)
 		}
 		return false
 	}
 	return true
 }
 
-func parseCAKeyFile(cfg *Config, path string, strictLogMsg string, logParse bool) []ssh.PublicKey {
+func parseCAKeyFile(cfg *config.Config, path string, strictLogMsg string, logParse bool) []ssh.PublicKey {
 	if !isCAPathAllowed(cfg, path, strictLogMsg) {
 		return nil
 	}
 	b, err := os.ReadFile(path)
 	if err != nil {
 		if logParse {
-			logEvent("warn", "", nil, path, "read error", nil, err)
+			config.LogEvent("warn", "", nil, path, "read error", nil, err)
 		}
 		return nil
 	}
@@ -40,7 +42,7 @@ func parseCAKeyFile(cfg *Config, path string, strictLogMsg string, logParse bool
 		pub, _, _, r, err := ssh.ParseAuthorizedKey(rest)
 		if err != nil {
 			if logParse {
-				logEvent("warn", "", nil, path, "parse error", nil, err)
+				config.LogEvent("warn", "", nil, path, "parse error", nil, err)
 			}
 			break
 		}
@@ -50,20 +52,20 @@ func parseCAKeyFile(cfg *Config, path string, strictLogMsg string, logParse bool
 			out = append(out, pub)
 		}
 		if logParse {
-			logEvent("debug", "", nil, path, "ca key loaded", nil, nil)
+			config.LogEvent("debug", "", nil, path, "ca key loaded", nil, nil)
 		}
 		rest = r
 	}
 	return out
 }
 
-func loadStaticCAKeys(cfg *Config, paths []string) []ssh.PublicKey {
-	files := expandPathSpecs(paths, "", func(_ string, e os.DirEntry) bool {
+func loadStaticCAKeys(cfg *config.Config, paths []string) []ssh.PublicKey {
+	files := config.ExpandPathSpecs(paths, "", func(_ string, e os.DirEntry) bool {
 		return !e.IsDir() && strings.HasSuffix(e.Name(), ".pub")
 	}, func(path string, err error) {
-		logEvent("warn", "", nil, path, "ca path scan failed", nil, err)
+		config.LogEvent("warn", "", nil, path, "ca path scan failed", nil, err)
 	})
-	uniq := uniqStrings(files)
+	uniq := config.UniqStrings(files)
 	out := make([]ssh.PublicKey, 0, len(uniq))
 	for _, path := range uniq {
 		keys := parseCAKeyFile(cfg, path, "strictmodes denied (ca key)", true)
@@ -72,26 +74,26 @@ func loadStaticCAKeys(cfg *Config, paths []string) []ssh.PublicKey {
 	return out
 }
 
-func loadPerUserCAKeys(cfg *Config, user string, templatedSpecs []string) []ssh.PublicKey {
+func loadPerUserCAKeys(cfg *config.Config, user string, templatedSpecs []string) []ssh.PublicKey {
 	user = rxUser.ReplaceAllString(user, "")
 	if user == "" || len(templatedSpecs) == 0 {
 		return nil
 	}
-	files := expandPathSpecs(templatedSpecs, user, func(_ string, e os.DirEntry) bool {
+	files := config.ExpandPathSpecs(templatedSpecs, user, func(_ string, e os.DirEntry) bool {
 		return !e.IsDir() && strings.HasSuffix(e.Name(), ".pub")
 	}, nil)
 	out := make([]ssh.PublicKey, 0, len(files))
-	for _, f := range uniqStrings(files) {
+	for _, f := range config.UniqStrings(files) {
 		keys := parseCAKeyFile(cfg, f, "", false)
 		out = append(out, keys...)
 	}
 	return out
 }
 
-func loadCertPermit(cfg *Config, user string) string {
+func LoadCertPermit(cfg *config.Config, user string) string {
 	for _, tmpl := range cfg.AuthKeys {
 		path := strings.ReplaceAll(tmpl, "{user}", user)
-		if !isAuthKeysPathAllowed(cfg, path) {
+		if !config.IsAuthKeysPathAllowed(cfg, path) {
 			continue
 		}
 		if opts := parsePermitOptionsFromFile(path); opts != "" {
@@ -134,10 +136,10 @@ func parsePermitOptionsFromFile(path string) string {
 	if len(permits) == 0 {
 		return ""
 	}
-	return strings.Join(uniqStrings(permits), ",")
+	return strings.Join(config.UniqStrings(permits), ",")
 }
 
-func newSSHServerConfig(cfg *Config, certOnly bool, metrics *Metrics) *ssh.ServerConfig {
+func NewSSHServerConfig(cfg *config.Config, certOnly bool, metrics *metrics.Metrics) *ssh.ServerConfig {
 	srv := &ssh.ServerConfig{
 		Config: ssh.Config{
 			Ciphers:      cfg.Ciphers,
@@ -167,7 +169,7 @@ func newSSHServerConfig(cfg *Config, certOnly bool, metrics *Metrics) *ssh.Serve
 			if _, ok := key.(*ssh.Certificate); !ok {
 				err := ErrCertRequired
 				metrics.RecordAuthDenied()
-				logEvent("err", "", meta, "", "auth denied", keyHash(key), err)
+				config.LogEvent("err", "", meta, "", "auth denied", keyHash(key), err)
 				return nil, err
 			}
 		}
@@ -181,7 +183,7 @@ func newSSHServerConfig(cfg *Config, certOnly bool, metrics *Metrics) *ssh.Serve
 					if rsaKey.N.BitLen() < cfg.RsaMin {
 						err := fmt.Errorf("rsa key too small: %d < %d", rsaKey.N.BitLen(), cfg.RsaMin)
 						metrics.RecordAuthDenied()
-						logEvent("err", "", meta, "", "auth denied", keyHash(key), err)
+						config.LogEvent("err", "", meta, "", "auth denied", keyHash(key), err)
 						return nil, err
 					}
 				}
@@ -194,7 +196,7 @@ func newSSHServerConfig(cfg *Config, certOnly bool, metrics *Metrics) *ssh.Serve
 		perms, err := checker.Authenticate(meta, key)
 		if err != nil {
 			metrics.RecordAuthDenied()
-			logEvent("err", "", meta, "", "auth denied", keyHash(key), err)
+			config.LogEvent("err", "", meta, "", "auth denied", keyHash(key), err)
 			return nil, err
 		}
 		if perms == nil {
@@ -203,10 +205,10 @@ func newSSHServerConfig(cfg *Config, certOnly bool, metrics *Metrics) *ssh.Serve
 		if perms.Extensions == nil {
 			perms.Extensions = make(map[string]string)
 		}
-		logEvent("debug", "", meta, "", "auth allowed", keyHash(key), nil)
+		config.LogEvent("debug", "", meta, "", "auth allowed", keyHash(key), nil)
 		if _, isCert := key.(*ssh.Certificate); isCert {
-			if opts := loadCertPermit(cfg, meta.User()); opts != "" {
-				perms.Extensions[permissionKey] = opts
+			if opts := LoadCertPermit(cfg, meta.User()); opts != "" {
+				perms.Extensions[PermissionKey] = opts
 			}
 		}
 		return perms, nil

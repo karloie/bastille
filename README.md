@@ -154,9 +154,13 @@ Environment variables:
 
 **Structure:**
 ```
-app/              Main code
+cmd/bastille/     Binary entry point
+pkg/config/       Configuration, logging, path validation
+pkg/crypto/       SSH crypto, authentication, CA keys
+pkg/metrics/      Prometheus metrics (standalone)
+pkg/server/       Server connection handling
 doc/              Documentation and license
-Containerfile        Production image
+Containerfile     Production image
 Makefile          Build automation
 ```
 

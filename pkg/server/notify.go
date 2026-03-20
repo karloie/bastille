@@ -1,4 +1,4 @@
-package main
+package server
 
 import (
 	"context"
@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/karloie/bastille/pkg/config"
 )
 
 const smtpTimeout = 10 * time.Second
@@ -26,7 +28,7 @@ func resetSmtpState() {
 	smtpPassOnce = sync.Once{}
 }
 
-func loadSmtpPassword(cfg *Config) (string, error) {
+func loadSmtpPassword(cfg *config.Config) (string, error) {
 	smtpPassOnce.Do(func() {
 		if cfg.SmtpHost == "" || cfg.SmtpMail == "" {
 			return
@@ -41,13 +43,13 @@ func loadSmtpPassword(cfg *Config) (string, error) {
 	return smtpPass, smtpPassErr
 }
 
-func sendTunnelNotification(parent context.Context, cfg *Config, user, source, target string) {
+func sendTunnelNotification(parent context.Context, cfg *config.Config, user, source, target string) {
 	if cfg.SmtpHost == "" || cfg.SmtpMail == "" {
 		return
 	}
 	pass, err := loadSmtpPassword(cfg)
 	if err != nil {
-		logEvent("warn", "", nil, "", "smtp password read failed", nil, err)
+		config.LogEvent("warn", "", nil, "", "smtp password read failed", nil, err)
 		return
 	}
 	subject := fmt.Sprintf("SSH Jump: %s -> %s", user, target)
@@ -70,12 +72,12 @@ func sendTunnelNotification(parent context.Context, cfg *Config, user, source, t
 	case err := <-done:
 		if err != nil {
 			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
-				logEvent("warn", "", nil, "", "smtp timeout", nil, err)
+				config.LogEvent("warn", "", nil, "", "smtp timeout", nil, err)
 			} else {
-				logEvent("warn", "", nil, "", "smtp send failed", nil, err)
+				config.LogEvent("warn", "", nil, "", "smtp send failed", nil, err)
 			}
 		}
 	case <-ctx.Done():
-		logEvent("warn", "", nil, "", "smtp timeout", nil, ctx.Err())
+		config.LogEvent("warn", "", nil, "", "smtp timeout", nil, ctx.Err())
 	}
 }
