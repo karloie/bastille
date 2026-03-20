@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 
-.PHONY: help build test test-fast test-pretty coverage clean docker-build ci run
+.PHONY: help build test test-fast test-pretty coverage clean docker-build ci run ci-build ci-test
 
 IMAGE ?= karloie/bastille
 DOCKER_BUILD_FLAGS ?=
@@ -52,3 +52,8 @@ run: ## Run Docker image
 	  -t $(IMAGE):$$VERSION .
 	@VERSION=$${VERSION:-$$(git describe --tags --always --dirty 2>/dev/null || echo dev)}; \
 	docker run --rm $(IMAGE):$$VERSION
+ci-build: ## Build binary (used by shipkit CI)
+	@go build -o bastille ./app
+
+ci-test: ## Run all tests (used by shipkit CI)
+	@go test -count=1 ./app/...

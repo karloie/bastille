@@ -10,29 +10,12 @@ permissions:
   contents: read
 
 jobs:
-  workflow-validation:
-    name: Workflow Validation
-    concurrency:
-      group: ci-workflow-${{ github.ref }}
-      cancel-in-progress: true
-    uses: karloie/gh-workflows/.github/workflows/ci.yml@main
-    with:
-      make_targets: wf-lint wf-plan-release wf-plan-goreleaser wf-plan-rerelease
-      go_version: '1.25'
-
   build-and-test:
     name: Build and Test
     concurrency:
       group: ci-${{ github.ref }}
       cancel-in-progress: true
-    uses: karloie/gh-workflows/.github/workflows/ci.yml@main
+    uses: karloie/shipkit/.github/workflows/ci.yml@v0.0.26
     with:
       mode: build-test
-      go_version: '1.25'
-      node_version: '22'
-      node_cache: npm
-      frontend_install_cmd: npm ci
-      frontend_build_cmd: npm run build
-      go_mod_download_cmd: go mod download
-      build_cmd: make build
-      test_cmd: go test ./...
+      go_version: '1.24'
