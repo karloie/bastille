@@ -12,11 +12,11 @@ jobs:
     concurrency:
       group: rerelease-latest
       cancel-in-progress: false
-    uses: karloie/shipkit/.github/workflows/release.yml@v0.0.28
+    uses: karloie/shipkit/.github/workflows/release.yml@f0f498eab0d416d2dc5d9e3439304cb971d216ba
     with:
       image: karloie/bastille
       mode: rerelease
-      tool_ref: v0.0.28
+      tool_ref: f0f498eab0d416d2dc5d9e3439304cb971d216ba
       main_path: ./cmd/bastille
     secrets:
       DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}

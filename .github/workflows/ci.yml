@@ -15,7 +15,7 @@ jobs:
     concurrency:
       group: ci-${{ github.ref }}
       cancel-in-progress: true
-    uses: karloie/shipkit/.github/workflows/ci.yml@v0.0.28
+    uses: karloie/shipkit/.github/workflows/ci.yml@f0f498eab0d416d2dc5d9e3439304cb971d216ba
     with:
       mode: build-test
       go_version: '1.24'
