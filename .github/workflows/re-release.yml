@@ -9,10 +9,10 @@ permissions:
 
 jobs:
   rerelease:
-    uses: karloie/shipkit/.github/workflows/release.yml@v0.0.39
+    uses: karloie/shipkit/.github/workflows/release.yml@v0.0.41
     with:
       mode: rerelease
-      tool_ref: v0.0.39
+      tool_ref: v0.0.41
       image: karloie/bastille
     secrets:
       DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
