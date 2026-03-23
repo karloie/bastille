@@ -11,11 +11,20 @@ permissions:
 
 jobs:
   build-and-test:
-    name: Build and Test
-    concurrency:
-      group: ci-${{ github.ref }}
-      cancel-in-progress: true
-    uses: karloie/shipkit/.github/workflows/ci.yml@f0f498eab0d416d2dc5d9e3439304cb971d216ba
-    with:
-      mode: build-test
-      go_version: '1.24'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Install just
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh | bash -s -- --to /usr/local/bin
+      - name: Generate
+        run: just ci-generate
+      - name: Build
+        run: just ci-build
+      - name: Test
+        run: just ci-test
+      - name: Integration Test
+        run: just ci-integration-test
