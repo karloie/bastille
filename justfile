@@ -100,8 +100,8 @@ test: build
     #!/usr/bin/env bash
     echo "📦 Building release artifacts..."
     
-    # Ensure tools are available
-    shipkit install goreleaser
+    # Ensure tools are available (force to get latest version)
+    shipkit install --force goreleaser
     
     # Build and push Docker image with version tags (reads from plan.json)
     shipkit docker --release
