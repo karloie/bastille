@@ -83,12 +83,7 @@ test: build
 
 # Build binary (used by shipkit CI)
 @ci-build:
-    #!/usr/bin/env bash
-    BUILD_VERSION=${BUILD_VERSION:-$(git describe --tags --always --dirty 2>/dev/null || echo dev)}
-    BUILD_COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo unknown)
-    BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-    go build -ldflags "-X main.Version=$BUILD_VERSION -X main.GitCommit=$BUILD_COMMIT -X main.BuildTime=$BUILD_DATE" \
-      -o bastille ./cmd/bastille
+    shipkit go-build --output=bastille --main=./cmd/bastille
 
 # Run all tests (used by shipkit CI)
 @ci-test:
@@ -105,14 +100,11 @@ test: build
     #!/usr/bin/env bash
     echo "📦 Building release artifacts..."
     
-    # Build final binary with version from plan.json
-    shipkit go-build --output=bastille --main=./cmd/bastille
+    # Build and push Docker image with version tags (reads from plan.json)
+    shipkit docker --release
     
-    # Build and push Docker image with version tags
-    shipkit docker --release --image={{CONTAINER_IMAGE}} --file=Containerfile
-    
-    # Create GitHub release with binary
-    shipkit github-release bastille
+    # Create GitHub release and update homebrew tap
+    shipkit goreleaser --generate --homebrew
 
 # ci-summary is called at the end (optional target)
 # Use this for: posting summaries, sending notifications
