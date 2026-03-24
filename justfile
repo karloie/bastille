@@ -1,6 +1,6 @@
 # bastille justfile
 
-IMAGE := "karloie/bastille"
+CONTAINER_IMAGE := "karloie/bastille"
 DOCKER_BUILD_FLAGS := ""
 
 # Show available recipes
@@ -67,14 +67,14 @@ test: build
     BUILD_VERSION=${BUILD_VERSION:-$(git describe --tags --always --dirty 2>/dev/null || echo dev)}
     BUILD_COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo unknown)
     BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-    echo "Building {{IMAGE}}:$BUILD_VERSION (commit=$BUILD_COMMIT date=$BUILD_DATE)"
+    echo "Building {{CONTAINER_IMAGE}}:$BUILD_VERSION (commit=$BUILD_COMMIT date=$BUILD_DATE)"
     docker build \
       --build-arg BUILD_VERSION=$BUILD_VERSION \
       --build-arg BUILD_COMMIT=$BUILD_COMMIT \
       --build-arg BUILD_DATE=$BUILD_DATE \
-      -t {{IMAGE}}:$BUILD_VERSION . \
+      -t {{CONTAINER_IMAGE}}:$BUILD_VERSION . \
       -f Containerfile {{DOCKER_BUILD_FLAGS}}
-    docker run --rm {{IMAGE}}:$BUILD_VERSION
+    docker run --rm {{CONTAINER_IMAGE}}:$BUILD_VERSION
 
 # ci-generate is called before ci-build (optional target)
 # Use this for: code generation, frontend builds, npm install, etc.
@@ -109,7 +109,7 @@ test: build
     shipkit go-build --output=bastille --main=./cmd/bastille
     
     # Build and push Docker image with version tags
-    shipkit docker --release --image={{IMAGE}} --file=Containerfile
+    shipkit docker --release --image={{CONTAINER_IMAGE}} --file=Containerfile
     
     # Create GitHub release with binary
     shipkit github-release bastille
@@ -127,8 +127,8 @@ test: build
         echo "✅ bastille $VERSION released successfully!"
         echo ""
         echo "Artifacts:"
-        echo "  - Docker: {{IMAGE}}:$VERSION"
-        echo "  - Docker: {{IMAGE}}:latest"
+        echo "  - Docker: {{CONTAINER_IMAGE}}:$VERSION"
+        echo "  - Docker: {{CONTAINER_IMAGE}}:latest"
         echo "  - Binary: bastille"
         echo ""
     else
