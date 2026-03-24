@@ -99,11 +99,38 @@ test: build
 @ci-integration-test:
     echo "🧪 No separate integration tests defined for bastille"
 
-# Publish Docker image and binaries (used by shipkit CI)
-@ci-publish:
-    echo "Publishing bastille..."
-    shipkit publish-docker \
-        -image={{IMAGE}} \
-        -dockerfile=Containerfile \
-        -push=true \
-        -update-readme=true
+# ci-release is called after tests pass (optional target)
+# Use this for: building artifacts, pushing Docker images, creating releases
+@ci-release:
+    #!/usr/bin/env bash
+    echo "📦 Building release artifacts..."
+    
+    # Build final binary with version from plan.json
+    shipkit go-build --output=bastille --main=./cmd/bastille
+    
+    # Build and push Docker image with version tags
+    shipkit docker --release --image={{IMAGE}} --file=Containerfile
+    
+    # Create GitHub release with binary
+    shipkit github-release bastille
+
+# ci-summary is called at the end (optional target)
+# Use this for: posting summaries, sending notifications
+@ci-summary:
+    #!/usr/bin/env bash
+    echo "📊 Generating release summary..."
+    
+    # Generate summary message from plan.json
+    if [ -f plan.json ]; then
+        VERSION=$(shipkit env | grep BUILD_VERSION | cut -d'=' -f2)
+        echo ""
+        echo "✅ bastille $VERSION released successfully!"
+        echo ""
+        echo "Artifacts:"
+        echo "  - Docker: {{IMAGE}}:$VERSION"
+        echo "  - Docker: {{IMAGE}}:latest"
+        echo "  - Binary: bastille"
+        echo ""
+    else
+        echo "✅ bastille release complete"
+    fi
