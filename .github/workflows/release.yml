@@ -21,12 +21,12 @@ permissions:
 
 jobs:
   release:
-    uses: karloie/shipkit/.github/workflows/release.yml@v0.0.62
+    uses: karloie/shipkit/.github/workflows/release.yml@v0.0.57
     with:
       mode: release
       event_name: ${{ github.event_name }}
       bump: ${{ inputs.bump }}
-      tool_ref: v0.0.62
+      tool_ref: v0.0.57
       image: karloie/bastille
     secrets:
       DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
