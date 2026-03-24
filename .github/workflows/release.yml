@@ -20,7 +20,7 @@ permissions:
   pull-requests: read
 
 jobs:
-  release:
+  ci:
     uses: karloie/shipkit/.github/workflows/release.yml@v0.0.65
     with:
       mode: release
